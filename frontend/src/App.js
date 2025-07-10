@@ -1,4 +1,4 @@
-import React, { useState, useEffect } from 'react';
+import React, { useState } from 'react';
 import TabNavigation from './components/TabNavigation';
 import ChatAssistant from './components/ChatAssistant';
 import ProductSearch from './components/ProductSearch';
@@ -7,15 +7,6 @@ import './App.css';
 
 function App() {
   const [activeTab, setActiveTab] = useState('chat');
-  const [isLoaded, setIsLoaded] = useState(false);
-
-  useEffect(() => {
-    // Add loading animation
-    const timer = setTimeout(() => {
-      setIsLoaded(true);
-    }, 100);
-    return () => clearTimeout(timer);
-  }, []);
 
   const renderActiveComponent = () => {
     switch (activeTab) {
@@ -30,18 +21,12 @@ function App() {
     }
   };
 
-  if (!isLoaded) {
-    return (
-      <div className="App">
-        <div className="loading">
-          <h2>Loading Slovenian Grocery Intelligence...</h2>
-        </div>
-      </div>
-    );
-  }
-
   return (
     <div className="App">
+      <header className="app-header">
+        <h1>Grocery Intelligence</h1>
+        <p>Find the best grocery prices in Slovenia</p>
+      </header>
       
       <TabNavigation activeTab={activeTab} setActiveTab={setActiveTab} />
 
@@ -50,7 +35,7 @@ function App() {
       </main>
 
       <footer className="app-footer">
-        <p>© 2024 Slovenian Grocery Intelligence | Powered by AI</p>
+        <p>© 2024 Grocery Intelligence</p>
       </footer>
     </div>
   );

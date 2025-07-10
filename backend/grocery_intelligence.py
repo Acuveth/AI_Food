@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 """
-Enhanced Slovenian Grocery Intelligence with Dynamic LLM-Based Validation
-Uses intelligent LLM analysis instead of hard-coded rules
+Enhanced Slovenian Grocery Intelligence with Think-First Approach
+First generates intelligent product lists, then searches database
 """
 
 import asyncio
@@ -17,6 +17,9 @@ import os
 from dotenv import load_dotenv
 from contextlib import asynccontextmanager
 from openai import OpenAI
+
+# Import the new intelligent product generator
+from intelligent_product_generator import IntelligentProductGenerator
 
 # Import the dynamic validator
 from semantic_search_validation import DynamicSemanticValidator, EnhancedProductSearchWithDynamicValidation
@@ -71,6 +74,7 @@ class ProductResult:
     ai_nutrition_grade: Optional[str] = None
     ai_value_rating: Optional[int] = None
     validation_confidence: Optional[float] = None
+    generated_match: Optional[bool] = False  # New field to track if it was in generated list
 
 class DatabaseManager:
     """Handles database connections and operations"""
@@ -121,12 +125,13 @@ class DatabaseManager:
         return results[0] if results else None
 
 class EnhancedSlovenianGroceryMCP:
-    """Enhanced grocery intelligence system with dynamic LLM-based validation"""
+    """Enhanced grocery intelligence system with think-first approach"""
     
     def __init__(self, db_config: Dict[str, Any]):
         self.db_manager = DatabaseManager(db_config)
         self.dynamic_validator = DynamicSemanticValidator()
         self.enhanced_search = None  # Will be initialized after db connection
+        self.product_generator = IntelligentProductGenerator()  # New intelligent generator
         self.stores = [store.value for store in StoreType]
         self.meal_templates = {
             "breakfast": ["mleko", "kruh", "jajca", "maslo", "džem", "jogurt"],
@@ -196,7 +201,420 @@ class EnhancedSlovenianGroceryMCP:
             "ai_diet_compatibility": row.get("ai_diet_compatibility")
         }
     
-    # Core functionality methods with dynamic validation
+    async def _search_generated_products(self, generated_products: List[Dict], max_results: int = 50) -> List[Dict]:
+        """Search for generated products in database"""
+        all_found_products = []
+        
+        for product_info in generated_products:
+            product_name = product_info.get("name", "")
+            alternatives = product_info.get("alternatives", [])
+            
+            # Search for main product name
+            if product_name:
+                search_result = await self.find_cheapest_product(
+                    product_name, use_semantic_validation=True
+                )
+                
+                for product in search_result:
+                    product["generated_match"] = True
+                    product["generated_info"] = product_info
+                    all_found_products.append(product)
+            
+            # Search for alternatives if main search didn't return many results
+            if len(all_found_products) < 3:
+                for alt_name in alternatives[:2]:  # Limit to 2 alternatives
+                    search_result = await self.find_cheapest_product(
+                        alt_name, use_semantic_validation=True
+                    )
+                    
+                    for product in search_result:
+                        product["generated_match"] = True
+                        product["generated_info"] = product_info
+                        all_found_products.append(product)
+        
+        # Remove duplicates based on product name and store
+        seen = set()
+        unique_products = []
+        for product in all_found_products:
+            key = (product.get("product_name", ""), product.get("store_name", ""))
+            if key not in seen:
+                seen.add(key)
+                unique_products.append(product)
+        
+        # Sort by price and limit results
+        unique_products.sort(key=lambda x: x.get("current_price", 0))
+        
+        logger.info(f"🔍 Found {len(unique_products)} products from generated list")
+        return unique_products[:max_results]
+    
+    # Enhanced functions with think-first approach
+    async def get_intelligent_health_focused_products(self, min_health_score: int = 7, limit: int = 50) -> Dict[str, Any]:
+        """Get health-focused products using think-first approach"""
+        try:
+            # Step 1: Generate intelligent product list
+            logger.info("🧠 Generating intelligent health-focused product list...")
+            generated_list = await self.product_generator.generate_health_focused_products()
+            
+            # Step 2: Search for generated products in database
+            logger.info("🔍 Searching for generated products in database...")
+            found_products = await self._search_generated_products(
+                generated_list.get("products", []), max_results=limit
+            )
+            
+            # Step 3: Call original function for comparison
+            logger.info("📊 Calling original function for comparison...")
+            try:
+                from database_source import EnhancedDatabaseSource, get_database_config
+                db_source = EnhancedDatabaseSource(get_database_config())
+                await db_source.connect()
+                original_results = await db_source.get_health_focused_products(min_health_score, limit)
+                await db_source.disconnect()
+            except Exception as e:
+                logger.warning(f"Original function failed: {e}")
+                original_results = []
+            
+            # Step 4: Combine and analyze results
+            combined_results = self._combine_results(found_products, original_results, "health_focused")
+            
+            return {
+                "success": True,
+                "products": combined_results,
+                "generated_count": len(found_products),
+                "original_count": len(original_results),
+                "total_products": len(combined_results),
+                "approach": "think_first_then_search",
+                "generated_list": generated_list,
+                "message": f"Found {len(combined_results)} health-focused products using intelligent generation"
+            }
+            
+        except Exception as e:
+            logger.error(f"Error in intelligent health search: {e}")
+            return {
+                "success": False,
+                "products": [],
+                "error": str(e),
+                "approach": "think_first_then_search"
+            }
+    
+    async def get_intelligent_diet_compatible_products(self, diet_type: str, limit: int = 50) -> Dict[str, Any]:
+        """Get diet-compatible products using think-first approach"""
+        try:
+            # Step 1: Generate intelligent product list
+            logger.info(f"🧠 Generating intelligent {diet_type} product list...")
+            generated_list = await self.product_generator.generate_diet_compatible_products(diet_type)
+            
+            # Step 2: Search for generated products in database
+            logger.info("🔍 Searching for generated products in database...")
+            found_products = await self._search_generated_products(
+                generated_list.get("products", []), max_results=limit
+            )
+            
+            # Step 3: Call original function for comparison
+            logger.info("📊 Calling original function for comparison...")
+            try:
+                from database_source import EnhancedDatabaseSource, get_database_config
+                db_source = EnhancedDatabaseSource(get_database_config())
+                await db_source.connect()
+                original_results = await db_source.get_diet_compatible_products(diet_type, limit)
+                await db_source.disconnect()
+            except Exception as e:
+                logger.warning(f"Original function failed: {e}")
+                original_results = []
+            
+            # Step 4: Combine and analyze results
+            combined_results = self._combine_results(found_products, original_results, "diet_compatible")
+            
+            return {
+                "success": True,
+                "products": combined_results,
+                "diet_type": diet_type,
+                "generated_count": len(found_products),
+                "original_count": len(original_results),
+                "total_products": len(combined_results),
+                "approach": "think_first_then_search",
+                "generated_list": generated_list,
+                "message": f"Found {len(combined_results)} {diet_type} products using intelligent generation"
+            }
+            
+        except Exception as e:
+            logger.error(f"Error in intelligent diet search: {e}")
+            return {
+                "success": False,
+                "products": [],
+                "error": str(e),
+                "approach": "think_first_then_search"
+            }
+    
+    async def get_intelligent_meal_planning_suggestions(self, meal_type: str, people_count: int = 1, budget: float = None) -> Dict[str, Any]:
+        """Get meal planning suggestions using think-first approach"""
+        try:
+            # Step 1: Generate intelligent product list
+            logger.info(f"🧠 Generating intelligent meal planning for {meal_type}...")
+            generated_list = await self.product_generator.generate_meal_planning_products(meal_type, people_count, budget)
+            
+            # Step 2: Search for generated products in database
+            logger.info("🔍 Searching for generated products in database...")
+            found_products = await self._search_generated_products(
+                generated_list.get("products", []), max_results=30
+            )
+            
+            # Step 3: Call original function for comparison
+            logger.info("📊 Calling original function for comparison...")
+            try:
+                from database_source import EnhancedDatabaseSource, get_database_config
+                db_source = EnhancedDatabaseSource(get_database_config())
+                await db_source.connect()
+                original_results = await db_source.get_meal_planning_suggestions(meal_type, "moderate")
+                await db_source.disconnect()
+            except Exception as e:
+                logger.warning(f"Original function failed: {e}")
+                original_results = []
+            
+            # Step 4: Combine and analyze results
+            combined_results = self._combine_results(found_products, original_results, "meal_planning")
+            
+            # Step 5: Calculate shopping list with budget
+            if budget:
+                shopping_list = self._create_optimized_shopping_list(combined_results, budget, people_count)
+            else:
+                shopping_list = combined_results
+            
+            return {
+                "success": True,
+                "products": shopping_list,
+                "meal_type": meal_type,
+                "people_count": people_count,
+                "budget": budget,
+                "generated_count": len(found_products),
+                "original_count": len(original_results),
+                "total_products": len(combined_results),
+                "approach": "think_first_then_search",
+                "generated_list": generated_list,
+                "message": f"Found {len(combined_results)} products for {meal_type} meal planning"
+            }
+            
+        except Exception as e:
+            logger.error(f"Error in intelligent meal planning: {e}")
+            return {
+                "success": False,
+                "products": [],
+                "error": str(e),
+                "approach": "think_first_then_search"
+            }
+    
+    async def get_intelligent_seasonal_recommendations(self, season: str = None) -> Dict[str, Any]:
+        """Get seasonal recommendations using think-first approach"""
+        try:
+            # Step 1: Generate intelligent product list
+            logger.info(f"🧠 Generating intelligent seasonal products for {season}...")
+            generated_list = await self.product_generator.generate_seasonal_products(season)
+            
+            # Step 2: Search for generated products in database
+            logger.info("🔍 Searching for generated products in database...")
+            found_products = await self._search_generated_products(
+                generated_list.get("products", []), max_results=40
+            )
+            
+            # Step 3: Call original function for comparison
+            logger.info("📊 Calling original function for comparison...")
+            try:
+                from database_source import EnhancedDatabaseSource, get_database_config
+                db_source = EnhancedDatabaseSource(get_database_config())
+                await db_source.connect()
+                original_results = await db_source.get_seasonal_recommendations(season)
+                await db_source.disconnect()
+            except Exception as e:
+                logger.warning(f"Original function failed: {e}")
+                original_results = []
+            
+            # Step 4: Combine and analyze results
+            combined_results = self._combine_results(found_products, original_results, "seasonal")
+            
+            return {
+                "success": True,
+                "products": combined_results,
+                "season": season or "current",
+                "generated_count": len(found_products),
+                "original_count": len(original_results),
+                "total_products": len(combined_results),
+                "approach": "think_first_then_search",
+                "generated_list": generated_list,
+                "message": f"Found {len(combined_results)} seasonal products using intelligent generation"
+            }
+            
+        except Exception as e:
+            logger.error(f"Error in intelligent seasonal search: {e}")
+            return {
+                "success": False,
+                "products": [],
+                "error": str(e),
+                "approach": "think_first_then_search"
+            }
+    
+    async def get_intelligent_smart_shopping_deals(self, min_deal_quality: str = "good") -> Dict[str, Any]:
+        """Get smart shopping deals using think-first approach"""
+        try:
+            # Step 1: Generate intelligent product list
+            logger.info("🧠 Generating intelligent smart shopping product list...")
+            generated_list = await self.product_generator.generate_smart_shopping_products()
+            
+            # Step 2: Search for generated products in database
+            logger.info("🔍 Searching for generated products in database...")
+            found_products = await self._search_generated_products(
+                generated_list.get("products", []), max_results=50
+            )
+            
+            # Step 3: Call original function for comparison
+            logger.info("📊 Calling original function for comparison...")
+            try:
+                from database_source import EnhancedDatabaseSource, get_database_config
+                db_source = EnhancedDatabaseSource(get_database_config())
+                await db_source.connect()
+                original_results = await db_source.get_smart_shopping_deals(min_deal_quality)
+                await db_source.disconnect()
+            except Exception as e:
+                logger.warning(f"Original function failed: {e}")
+                original_results = []
+            
+            # Step 4: Combine and analyze results, prioritizing deals
+            combined_results = self._combine_results(found_products, original_results, "smart_deals")
+            
+            # Step 5: Filter for actual deals and good value
+            deal_products = [p for p in combined_results if p.get("has_discount", False)]
+            
+            return {
+                "success": True,
+                "products": deal_products,
+                "all_products": combined_results,
+                "generated_count": len(found_products),
+                "original_count": len(original_results),
+                "deals_count": len(deal_products),
+                "total_products": len(combined_results),
+                "approach": "think_first_then_search",
+                "generated_list": generated_list,
+                "message": f"Found {len(deal_products)} smart shopping deals using intelligent generation"
+            }
+            
+        except Exception as e:
+            logger.error(f"Error in intelligent smart shopping: {e}")
+            return {
+                "success": False,
+                "products": [],
+                "error": str(e),
+                "approach": "think_first_then_search"
+            }
+    
+    async def get_intelligent_allergen_safe_products(self, avoid_allergens: List[str]) -> Dict[str, Any]:
+        """Get allergen-safe products using think-first approach"""
+        try:
+            # Step 1: Generate intelligent product list
+            logger.info(f"🧠 Generating intelligent allergen-safe products (avoiding {avoid_allergens})...")
+            generated_list = await self.product_generator.generate_allergen_safe_products(avoid_allergens)
+            
+            # Step 2: Search for generated products in database
+            logger.info("🔍 Searching for generated products in database...")
+            found_products = await self._search_generated_products(
+                generated_list.get("products", []), max_results=50
+            )
+            
+            # Step 3: Call original function for comparison
+            logger.info("📊 Calling original function for comparison...")
+            try:
+                from database_source import EnhancedDatabaseSource, get_database_config
+                db_source = EnhancedDatabaseSource(get_database_config())
+                await db_source.connect()
+                original_results = await db_source.get_allergen_safe_products(avoid_allergens)
+                await db_source.disconnect()
+            except Exception as e:
+                logger.warning(f"Original function failed: {e}")
+                original_results = []
+            
+            # Step 4: Combine and analyze results
+            combined_results = self._combine_results(found_products, original_results, "allergen_safe")
+            
+            return {
+                "success": True,
+                "products": combined_results,
+                "avoided_allergens": avoid_allergens,
+                "generated_count": len(found_products),
+                "original_count": len(original_results),
+                "total_products": len(combined_results),
+                "approach": "think_first_then_search",
+                "generated_list": generated_list,
+                "message": f"Found {len(combined_results)} allergen-safe products using intelligent generation"
+            }
+            
+        except Exception as e:
+            logger.error(f"Error in intelligent allergen search: {e}")
+            return {
+                "success": False,
+                "products": [],
+                "error": str(e),
+                "approach": "think_first_then_search"
+            }
+    
+    def _combine_results(self, generated_products: List[Dict], original_products: List[Dict], search_type: str) -> List[Dict]:
+        """Combine and deduplicate results from generated and original searches"""
+        
+        # Start with generated products (they have higher priority)
+        combined = []
+        seen_products = set()
+        
+        # Add generated products first
+        for product in generated_products:
+            key = (product.get("product_name", ""), product.get("store_name", ""))
+            if key not in seen_products:
+                product["source"] = "generated"
+                combined.append(product)
+                seen_products.add(key)
+        
+        # Add original products that we haven't seen
+        for product in original_products:
+            key = (product.get("product_name", ""), product.get("store_name", ""))
+            if key not in seen_products:
+                product["source"] = "original"
+                combined.append(product)
+                seen_products.add(key)
+        
+        # Sort by relevance (generated first, then by price)
+        combined.sort(key=lambda x: (
+            0 if x.get("source") == "generated" else 1,
+            x.get("current_price", 0)
+        ))
+        
+        logger.info(f"📊 Combined results: {len(generated_products)} generated + {len(original_products)} original = {len(combined)} total")
+        return combined
+    
+    def _create_optimized_shopping_list(self, products: List[Dict], budget: float, people_count: int) -> List[Dict]:
+        """Create optimized shopping list within budget"""
+        
+        # Sort by value (price per quality/health score)
+        def calculate_value_score(product):
+            price = product.get("current_price", 0)
+            health_score = product.get("ai_health_score", 5)
+            discount = product.get("discount_percentage", 0)
+            
+            # Higher health score and discount = better value
+            value = (health_score * (100 + discount)) / max(price, 0.01)
+            return value
+        
+        products.sort(key=calculate_value_score, reverse=True)
+        
+        # Select products within budget
+        shopping_list = []
+        total_cost = 0.0
+        
+        for product in products:
+            item_cost = product.get("current_price", 0) * people_count
+            if total_cost + item_cost <= budget:
+                product["quantity"] = people_count
+                product["total_cost"] = item_cost
+                shopping_list.append(product)
+                total_cost += item_cost
+        
+        return shopping_list
+    
+    # Keep existing methods for basic functionality
     async def find_cheapest_product(
         self, 
         product_name: str, 
@@ -292,282 +710,6 @@ class EnhancedSlovenianGroceryMCP:
         except Exception as e:
             logger.error(f"Error in raw product search: {e}")
             return []
-
-    async def compare_prices(
-        self, 
-        product_name: str, 
-        stores: Optional[List[str]] = None,
-        use_semantic_validation: bool = True
-    ) -> Dict[str, List[Dict]]:
-        """Compare prices across stores with dynamic validation"""
-        try:
-            # Get results with dynamic validation
-            if use_semantic_validation and self.enhanced_search:
-                result = await self.enhanced_search.search_products_with_intelligent_validation(
-                    product_name, max_results=100, validation_enabled=True
-                )
-                
-                if result["success"]:
-                    all_results = result["products"]
-                    logger.info(f"📊 Using validated results for price comparison")
-                else:
-                    # Fallback to raw results
-                    all_results = await self._get_raw_product_search(product_name, limit=100)
-                    logger.info(f"📊 Using raw results for price comparison (validation failed)")
-            else:
-                # Use raw search
-                all_results = await self._get_raw_product_search(product_name, limit=100)
-            
-            # Filter by stores if specified
-            if stores:
-                all_results = [r for r in all_results if r['store_name'] in stores]
-            
-            # Group by store
-            store_results = {}
-            for row in all_results:
-                store = row['store_name']
-                if store not in store_results:
-                    store_results[store] = []
-                store_results[store].append(row)
-            
-            logger.info(f"📊 Price comparison: {len(store_results)} stores, {len(all_results)} products")
-            return store_results
-            
-        except Exception as e:
-            logger.error(f"Error comparing prices: {e}")
-            return {}
-
-    async def create_budget_shopping_list(
-        self, 
-        budget: float, 
-        meal_type: str, 
-        people_count: int = 1, 
-        dietary_restrictions: Optional[List[str]] = None,
-        use_semantic_validation: bool = True
-    ) -> Dict:
-        """Create budget-optimized shopping list with dynamic validation"""
-        try:
-            # Get base items for meal type
-            base_items = self.meal_templates.get(meal_type, self.meal_templates["lunch"])
-            
-            shopping_list = []
-            total_cost = 0.0
-            stores_needed = set()
-            validation_issues = []
-            
-            # Find cheapest version of each item with dynamic validation
-            for item in base_items:
-                if total_cost >= budget:
-                    break
-                
-                # Use dynamic validation for shopping list
-                search_result = await self.find_cheapest_product_with_intelligent_suggestions(item)
-                
-                if search_result["success"] and search_result["products"]:
-                    products = search_result["products"]
-                    
-                    # Filter by dietary restrictions if provided
-                    if dietary_restrictions:
-                        products = self._filter_by_dietary_restrictions(products, dietary_restrictions)
-                    
-                    if products:
-                        best_product = products[0]  # Already sorted by price
-                        quantity_needed = people_count
-                        item_cost = best_product['current_price'] * quantity_needed
-                        
-                        if total_cost + item_cost <= budget:
-                            shopping_list.append({
-                                **best_product,
-                                'quantity': quantity_needed,
-                                'total_item_cost': item_cost
-                            })
-                            total_cost += item_cost
-                            stores_needed.add(best_product['store_name'])
-                        else:
-                            validation_issues.append(f"Budget exceeded for {item}")
-                    else:
-                        validation_issues.append(f"No products found matching dietary restrictions for {item}")
-                else:
-                    validation_issues.append(f"No validated products found for {item}")
-                    # Add suggestions to validation issues
-                    if search_result.get("suggestions"):
-                        validation_issues.append(f"Suggestions for {item}: {', '.join(search_result['suggestions'])}")
-            
-            # Calculate additional statistics
-            avg_item_cost = total_cost / len(shopping_list) if shopping_list else 0
-            budget_efficiency = (total_cost / budget) * 100 if budget > 0 else 0
-            
-            result = {
-                "shopping_list": shopping_list,
-                "total_cost": total_cost,
-                "budget_used": total_cost,
-                "budget_remaining": budget - total_cost,
-                "budget_efficiency": budget_efficiency,
-                "average_item_cost": avg_item_cost,
-                "stores_needed": list(stores_needed),
-                "serves": people_count,
-                "meal_type": meal_type,
-                "validation_applied": use_semantic_validation,
-                "validation_issues": validation_issues,
-                "items_found": len(shopping_list),
-                "items_requested": len(base_items)
-            }
-            
-            logger.info(f"🛒 Shopping list created: {len(shopping_list)} items, €{total_cost:.2f} cost")
-            return result
-            
-        except Exception as e:
-            logger.error(f"Error creating shopping list: {e}")
-            return {
-                "shopping_list": [],
-                "total_cost": 0.0,
-                "budget_used": 0.0,
-                "budget_remaining": budget,
-                "stores_needed": [],
-                "serves": people_count,
-                "meal_type": meal_type,
-                "validation_applied": use_semantic_validation,
-                "error": str(e)
-            }
-
-    # Helper methods (keep existing ones)
-    def _filter_by_dietary_restrictions(self, products: List[Dict], restrictions: List[str]) -> List[Dict]:
-        """Filter products by dietary restrictions using LLM understanding"""
-        filtered = []
-        for product in products:
-            category = product.get('ai_main_category', '').lower()
-            product_name = product.get('product_name', '').lower()
-            diet_compatibility = product.get('ai_diet_compatibility', '').lower()
-            
-            # Use AI diet compatibility if available
-            if diet_compatibility:
-                if any(restriction.lower() in diet_compatibility for restriction in restrictions):
-                    filtered.append(product)
-                    continue
-            
-            # Fallback to simple filtering logic
-            should_include = True
-            for restriction in restrictions:
-                restriction_lower = restriction.lower()
-                
-                if restriction_lower == 'vegetarian':
-                    if 'meso' in product_name or 'meat' in product_name:
-                        should_include = False
-                        break
-                elif restriction_lower == 'vegan':
-                    if any(x in product_name for x in ['meso', 'mleko', 'sir', 'jajca', 'meat', 'milk', 'cheese', 'egg']):
-                        should_include = False
-                        break
-                elif restriction_lower == 'gluten_free':
-                    if any(x in product_name for x in ['kruh', 'testenine', 'pšenica', 'bread', 'pasta', 'wheat']):
-                        should_include = False
-                        break
-            
-            if should_include:
-                filtered.append(product)
-        
-        return filtered
-
-    async def get_product_insights(self, product_name: str) -> Dict[str, Any]:
-        """Get detailed insights about a product using LLM analysis"""
-        try:
-            # Get product results with validation
-            search_result = await self.find_cheapest_product_with_intelligent_suggestions(product_name)
-            
-            if not search_result["success"] or not search_result["products"]:
-                return {
-                    "success": False,
-                    "message": f"No insights available for '{product_name}'",
-                    "suggestions": search_result.get("suggestions", [])
-                }
-            
-            products = search_result["products"][:10]  # Analyze top 10 products
-            
-            # Generate insights using LLM
-            insights_prompt = f"""
-            Analyze these grocery products for "{product_name}":
-
-            {json.dumps([{
-                "name": p.get("product_name", ""),
-                "store": p.get("store_name", ""),
-                "price": p.get("current_price", 0),
-                "category": p.get("ai_main_category", ""),
-                "health_score": p.get("ai_health_score"),
-                "has_discount": p.get("has_discount", False),
-                "discount_percentage": p.get("discount_percentage")
-            } for p in products], indent=2)}
-
-            Provide insights in JSON format:
-            {{
-                "price_analysis": {{
-                    "cheapest_price": 0.0,
-                    "most_expensive_price": 0.0,
-                    "average_price": 0.0,
-                    "best_value_store": "store_name"
-                }},
-                "health_analysis": {{
-                    "average_health_score": 0.0,
-                    "healthiest_option": "product_name",
-                    "health_recommendation": "text"
-                }},
-                "savings_opportunities": [
-                    {{
-                        "store": "store_name",
-                        "product": "product_name",
-                        "savings": 0.0,
-                        "discount_percentage": 0
-                    }}
-                ],
-                "recommendations": [
-                    "recommendation 1",
-                    "recommendation 2"
-                ],
-                "summary": "Brief summary of findings"
-            }}
-            """
-            
-            response = await asyncio.get_event_loop().run_in_executor(
-                None,
-                lambda: client.chat.completions.create(
-                    model="gpt-4o-mini",
-                    messages=[{"role": "user", "content": insights_prompt}],
-                    temperature=0.1,
-                    max_tokens=1000
-                )
-            )
-            
-            insights_text = response.choices[0].message.content.strip()
-            
-            # Parse insights
-            try:
-                if "```json" in insights_text:
-                    json_text = insights_text.split("```json")[1].split("```")[0].strip()
-                else:
-                    json_text = insights_text
-                    
-                insights = json.loads(json_text)
-                
-                return {
-                    "success": True,
-                    "product_name": product_name,
-                    "insights": insights,
-                    "products_analyzed": len(products),
-                    "validation_applied": search_result.get("validation_applied", False)
-                }
-                
-            except json.JSONDecodeError:
-                return {
-                    "success": False,
-                    "message": "Failed to parse insights",
-                    "raw_response": insights_text
-                }
-                
-        except Exception as e:
-            logger.error(f"Error generating insights: {e}")
-            return {
-                "success": False,
-                "message": f"Failed to generate insights: {str(e)}"
-            }
 
 if __name__ == "__main__":
     asyncio.run()

@@ -2,9 +2,9 @@ import React from 'react';
 
 const TabNavigation = ({ activeTab, setActiveTab }) => {
   const tabs = [
-    { id: 'chat', label: 'Chat Assistant', icon: '💬' },
-    { id: 'search', label: 'Product Search', icon: '🔍' },
-    { id: 'promotions', label: 'Promotions', icon: '🏷️' },
+    { id: 'chat', label: 'Chat', icon: '💬' },
+    { id: 'search', label: 'Search', icon: '🔍' },
+    { id: 'promotions', label: 'Deals', icon: '🏷️' },
   ];
 
   return (

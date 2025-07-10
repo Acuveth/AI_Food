@@ -21,24 +21,17 @@ class ApiService {
     }
   }
 
-  async sendChatMessage(message, model = 'gpt-3.5-turbo') {
+  async sendChatMessage(message) {
     return this.request('/api/chat', {
       method: 'POST',
-      body: JSON.stringify({ message, model }),
+      body: JSON.stringify({ message }),
     });
   }
 
-  async searchProducts(productName, location = 'Ljubljana') {
+  async searchProducts(productName) {
     return this.request('/api/search', {
       method: 'POST',
-      body: JSON.stringify({ product_name: productName, location }),
-    });
-  }
-
-  async getPromotions(store = null, category = null, min_discount = 10) {
-    return this.request('/api/promotions', {
-      method: 'POST',
-      body: JSON.stringify({ store, category, min_discount }),
+      body: JSON.stringify({ product_name: productName }),
     });
   }
 

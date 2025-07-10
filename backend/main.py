@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 """
-Enhanced FastAPI Backend with Dynamic LLM-Based Validation
-Uses intelligent LLM analysis instead of hard-coded semantic rules
+Enhanced FastAPI Backend with Think-First Approach
+Uses intelligent product generation before database search
 """
 
 import os
@@ -46,12 +46,12 @@ async def lifespan(app: FastAPI):
     global enhanced_grocery_mcp, enhanced_db_source, dynamic_validator
     
     # Startup
-    logger.info("🚀 Starting Enhanced Slovenian Grocery Intelligence API with Dynamic LLM Validation...")
+    logger.info("🚀 Starting Enhanced Slovenian Grocery Intelligence API with Think-First Approach...")
     
-    # Initialize enhanced grocery MCP with dynamic validation
+    # Initialize enhanced grocery MCP with think-first approach
     enhanced_grocery_mcp = EnhancedSlovenianGroceryMCP(db_config)
     await enhanced_grocery_mcp.connect_db()
-    logger.info("✅ Enhanced Grocery MCP with dynamic validation connected successfully")
+    logger.info("✅ Enhanced Grocery MCP with think-first approach connected successfully")
     
     # Initialize enhanced database source
     enhanced_db_source = EnhancedDatabaseSource(db_config)
@@ -75,8 +75,8 @@ async def lifespan(app: FastAPI):
 # Create FastAPI app
 app = FastAPI(
     title="Enhanced Slovenian Grocery Intelligence API",
-    description="AI-powered grocery shopping assistant with dynamic LLM-based validation that intelligently understands product intent",
-    version="5.0.0",
+    description="AI-powered grocery shopping assistant with think-first approach that generates intelligent product lists before searching",
+    version="6.0.0",
     lifespan=lifespan
 )
 
@@ -89,13 +89,13 @@ app.add_middleware(
     allow_headers=["*"],
 )
 
-# Enhanced OpenAI function definitions
+# Enhanced OpenAI function definitions with think-first approach
 ENHANCED_GROCERY_FUNCTIONS = [
     {
         "type": "function",
         "function": {
-            "name": "find_products_with_dynamic_validation",
-            "description": "Find products using intelligent LLM-based validation that understands product intent without hard-coded rules",
+            "name": "find_products_with_intelligent_validation",
+            "description": "Find products using intelligent LLM-based validation that understands product intent",
             "parameters": {
                 "type": "object",
                 "properties": {
@@ -110,22 +110,8 @@ ENHANCED_GROCERY_FUNCTIONS = [
     {
         "type": "function",
         "function": {
-            "name": "get_product_insights",
-            "description": "Get detailed LLM-generated insights about a product including price analysis, health analysis, and recommendations",
-            "parameters": {
-                "type": "object",
-                "properties": {
-                    "product_name": {"type": "string", "description": "Product name to analyze"}
-                },
-                "required": ["product_name"]
-            }
-        }
-    },
-    {
-        "type": "function",
-        "function": {
-            "name": "get_health_focused_recommendations",
-            "description": "Get health-focused product recommendations with AI health scoring",
+            "name": "get_intelligent_health_focused_products",
+            "description": "Get health-focused products using think-first approach: AI generates healthy product list, then searches database",
             "parameters": {
                 "type": "object",
                 "properties": {
@@ -138,12 +124,12 @@ ENHANCED_GROCERY_FUNCTIONS = [
     {
         "type": "function",
         "function": {
-            "name": "get_diet_compatible_products",
-            "description": "Find products compatible with specific diets using LLM understanding",
+            "name": "get_intelligent_diet_compatible_products",
+            "description": "Find diet-compatible products using think-first approach: AI generates diet-specific product list, then searches database",
             "parameters": {
                 "type": "object",
                 "properties": {
-                    "diet_type": {"type": "string", "description": "Diet type (vegan, vegetarian, keto, etc.)"}
+                    "diet_type": {"type": "string", "description": "Diet type (vegan, vegetarian, keto, gluten_free, etc.)"}
                 },
                 "required": ["diet_type"]
             }
@@ -152,8 +138,24 @@ ENHANCED_GROCERY_FUNCTIONS = [
     {
         "type": "function",
         "function": {
-            "name": "get_smart_shopping_deals",
-            "description": "Get intelligent shopping deals with AI analysis",
+            "name": "get_intelligent_meal_planning_suggestions",
+            "description": "Get meal planning suggestions using think-first approach: AI generates meal-specific product list, then searches database",
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "meal_type": {"type": "string", "enum": ["breakfast", "lunch", "dinner", "snack"], "description": "Type of meal"},
+                    "people_count": {"type": "integer", "description": "Number of people", "default": 1},
+                    "budget": {"type": "number", "description": "Budget in EUR (optional)"}
+                },
+                "required": ["meal_type"]
+            }
+        }
+    },
+    {
+        "type": "function",
+        "function": {
+            "name": "get_intelligent_smart_shopping_deals",
+            "description": "Get smart shopping deals using think-first approach: AI generates deal-worthy product list, then searches database",
             "parameters": {
                 "type": "object",
                 "properties": {
@@ -166,15 +168,42 @@ ENHANCED_GROCERY_FUNCTIONS = [
     {
         "type": "function",
         "function": {
+            "name": "get_intelligent_seasonal_recommendations",
+            "description": "Get seasonal recommendations using think-first approach: AI generates seasonal product list, then searches database",
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "season": {"type": "string", "enum": ["spring", "summer", "autumn", "winter"], "description": "Season (auto-detected if not provided)"}
+                },
+                "required": []
+            }
+        }
+    },
+    {
+        "type": "function",
+        "function": {
+            "name": "get_intelligent_allergen_safe_products",
+            "description": "Get allergen-safe products using think-first approach: AI generates allergen-safe product list, then searches database",
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "avoid_allergens": {"type": "array", "items": {"type": "string"}, "description": "List of allergens to avoid (e.g., ['gluten', 'dairy', 'nuts'])"}
+                },
+                "required": ["avoid_allergens"]
+            }
+        }
+    },
+    {
+        "type": "function",
+        "function": {
             "name": "create_intelligent_shopping_list",
-            "description": "Create a budget shopping list with dynamic LLM validation to ensure product relevance",
+            "description": "Create a shopping list using think-first approach: AI generates meal-specific product list, then searches database with budget optimization",
             "parameters": {
                 "type": "object",
                 "properties": {
                     "budget": {"type": "number", "description": "Budget in EUR"},
                     "meal_type": {"type": "string", "enum": ["breakfast", "lunch", "dinner", "snack"], "description": "Type of meal"},
-                    "people_count": {"type": "integer", "description": "Number of people", "default": 1},
-                    "use_validation": {"type": "boolean", "description": "Apply dynamic LLM validation", "default": True}
+                    "people_count": {"type": "integer", "description": "Number of people", "default": 1}
                 },
                 "required": ["budget", "meal_type"]
             }
@@ -199,82 +228,113 @@ ENHANCED_GROCERY_FUNCTIONS = [
 ]
 
 # Enhanced system message
-ENHANCED_SYSTEM_MESSAGE = """You are an advanced AI grocery shopping assistant for Slovenia with cutting-edge dynamic LLM-based validation.
+ENHANCED_SYSTEM_MESSAGE = """You are an advanced AI grocery shopping assistant for Slovenia with revolutionary think-first approach.
 
-🧠 **Your Revolutionary Capabilities:**
-You now have DYNAMIC LLM-BASED VALIDATION that intelligently understands product intent:
+🧠 **Your Revolutionary Think-First Approach:**
+Instead of directly searching the database (which has missing data), you now use a much smarter approach:
 
-**How Dynamic Validation Works:**
-1. **Database Analysis**: I analyze what products are actually in the database for each search
-2. **Intent Understanding**: I use LLM reasoning to understand what the user really wants
-3. **Intelligent Filtering**: I dynamically determine which products match the user's intent
-4. **No Hard-Coded Rules**: No more rigid category mappings or brand exclusions
-5. **Adaptive Learning**: Each search adapts to the database content and user intent
+**How Think-First Works:**
+1. **AI Product Generation**: I first use my knowledge to generate a comprehensive list of products that should be available
+2. **Targeted Database Search**: Then I search for each generated product specifically in the database
+3. **Comparison with Database Functions**: Finally, I compare with traditional database functions
+4. **Best Results**: I combine and present the best results from both approaches
 
-**Key Improvements:**
-✅ **Contextual Understanding** - Understands "mleko" means actual milk, not chocolate with "milk" in the name
-✅ **Database-Aware** - Analyzes what's actually available before filtering
-✅ **Intelligent Reasoning** - Uses LLM knowledge to make validation decisions
-✅ **Dynamic Suggestions** - Generates smart alternatives when no valid products found
-✅ **Confidence Scoring** - Provides transparency about validation confidence
+**Why This Is Better:**
+✅ **More Complete Results** - Database functions miss products due to incomplete data
+✅ **Intelligent Product Selection** - AI knows what products should exist for each request
+✅ **Better Coverage** - Searches for specific products rather than relying on database categories
+✅ **Optimal Recommendations** - Combines AI knowledge with real database pricing
 
-**Enhanced Features:**
-- 🔍 **Product Insights**: Detailed LLM analysis of price trends, health scores, and recommendations
-- 🎯 **Intent Recognition**: Understands user intent beyond literal search terms
-- 💡 **Smart Suggestions**: Intelligent alternatives based on database content
-- 📊 **Validation Transparency**: Clear explanations of why products were included/excluded
-- 🧠 **Adaptive Logic**: Learns from database content rather than following rigid rules
+**Revolutionary Functions:**
+- 🧠 **get_intelligent_health_focused_products**: AI generates healthy product list first
+- 🥗 **get_intelligent_diet_compatible_products**: AI generates diet-specific products first  
+- 🍽️ **get_intelligent_meal_planning_suggestions**: AI generates meal-specific products first
+- 🛒 **get_intelligent_smart_shopping_deals**: AI generates deal-worthy products first
+- 🌿 **get_intelligent_seasonal_recommendations**: AI generates seasonal products first
+- 🛡️ **get_intelligent_allergen_safe_products**: AI generates allergen-safe products first
+
+**Example of Think-First in Action:**
+User: "Find healthy breakfast options"
+1. AI generates: ["ovseni kosmiči", "grški jogurt", "borovnice", "banane", "mandljevo mleko"]
+2. Database search: Finds actual products and prices for each
+3. Comparison: Checks traditional health function for additional items
+4. Result: Complete, comprehensive list with real prices
 
 **Database Access:**
 - 34,790+ products from DM, Mercator, SPAR, TUS, LIDL
 - AI-enhanced with health scores, nutrition grades, value ratings
-- Dynamic validation ensures only relevant products
+- Think-first approach ensures comprehensive coverage
 
 **How to Help Users:**
-1. **Always use dynamic validation** for all product searches
-2. **Explain validation reasoning** when products are filtered
-3. **Provide intelligent suggestions** when no valid matches found
-4. **Show confidence levels** for validation decisions
-5. **Generate insights** using LLM analysis
+1. **Always use intelligent functions** for specialized requests
+2. **Explain the think-first approach** when relevant
+3. **Highlight comprehensive results** from AI generation
+4. **Show comparison insights** between generated and database results
+5. **Provide complete recommendations** with pricing
 
 **Example Response Pattern:**
-"I found 5 milk products for 'mleko' using dynamic validation. My AI analysis filtered out 3 chocolate products that contained 'milk' in their names but weren't actual milk. The validation confidence is 95%. Here are the actual milk products: [list products]"
+"I used my think-first approach for healthy products: first generated a comprehensive list of 15 healthy items that should be available, then searched the database for each one. Found 12 of them with actual prices, plus 3 additional items from the database function. Here are the best healthy options with prices: [results]"
 
-**When No Valid Results:**
-- Explain the validation reasoning
-- Provide database-aware suggestions based on available products
-- Offer to search with broader or alternative terms
-- Show what was found but filtered out and why
+The think-first approach ensures you get the most complete and intelligent recommendations possible, combining AI knowledge with real-time pricing data.
 
-Always prioritize intelligent understanding over rigid rules. The goal is to understand what users actually want and find the best matching products in the database.
-
-Respond in Slovenian when appropriate, and always highlight when dynamic validation provided better results than a simple search would have.
+Respond in Slovenian when appropriate, and always highlight when the think-first approach provided better results than traditional database functions would have.
 """
 
 async def execute_enhanced_function(function_name: str, arguments: dict, mcp: EnhancedSlovenianGroceryMCP, db_source: EnhancedDatabaseSource) -> dict:
-    """Execute enhanced grocery functions with dynamic LLM validation"""
+    """Execute enhanced grocery functions with think-first approach"""
     try:
-        if function_name == "find_products_with_dynamic_validation":
+        if function_name == "find_products_with_intelligent_validation":
             result = await mcp.find_cheapest_product_with_intelligent_suggestions(
                 product_name=arguments["product_name"],
                 store_preference=arguments.get("store_preference")
             )
             return result
         
-        elif function_name == "get_product_insights":
-            result = await mcp.get_product_insights(
-                product_name=arguments["product_name"]
+        elif function_name == "get_intelligent_health_focused_products":
+            result = await mcp.get_intelligent_health_focused_products(
+                min_health_score=arguments.get("min_health_score", 7)
             )
-            return {"insights_result": result}
+            return {"intelligent_health_result": result}
         
-        elif function_name == "create_intelligent_shopping_list":
-            result = await mcp.create_budget_shopping_list(
-                budget=arguments["budget"],
+        elif function_name == "get_intelligent_diet_compatible_products":
+            result = await mcp.get_intelligent_diet_compatible_products(
+                diet_type=arguments["diet_type"]
+            )
+            return {"intelligent_diet_result": result}
+        
+        elif function_name == "get_intelligent_meal_planning_suggestions":
+            result = await mcp.get_intelligent_meal_planning_suggestions(
                 meal_type=arguments["meal_type"],
                 people_count=arguments.get("people_count", 1),
-                use_semantic_validation=arguments.get("use_validation", True)
+                budget=arguments.get("budget")
             )
-            return {"shopping_list_result": result}
+            return {"intelligent_meal_result": result}
+        
+        elif function_name == "get_intelligent_smart_shopping_deals":
+            result = await mcp.get_intelligent_smart_shopping_deals(
+                min_deal_quality=arguments.get("min_deal_quality", "good")
+            )
+            return {"intelligent_deals_result": result}
+        
+        elif function_name == "get_intelligent_seasonal_recommendations":
+            result = await mcp.get_intelligent_seasonal_recommendations(
+                season=arguments.get("season")
+            )
+            return {"intelligent_seasonal_result": result}
+        
+        elif function_name == "get_intelligent_allergen_safe_products":
+            result = await mcp.get_intelligent_allergen_safe_products(
+                avoid_allergens=arguments["avoid_allergens"]
+            )
+            return {"intelligent_allergen_result": result}
+        
+        elif function_name == "create_intelligent_shopping_list":
+            result = await mcp.get_intelligent_meal_planning_suggestions(
+                meal_type=arguments["meal_type"],
+                people_count=arguments.get("people_count", 1),
+                budget=arguments["budget"]
+            )
+            return {"intelligent_shopping_list_result": result}
         
         elif function_name == "compare_prices_with_validation":
             result = await mcp.compare_prices(
@@ -283,24 +343,6 @@ async def execute_enhanced_function(function_name: str, arguments: dict, mcp: En
                 use_semantic_validation=arguments.get("use_validation", True)
             )
             return {"price_comparison": result}
-        
-        elif function_name == "get_health_focused_recommendations":
-            result = await db_source.get_health_focused_products(
-                min_health_score=arguments.get("min_health_score", 7)
-            )
-            return {"health_products": result, "count": len(result)}
-        
-        elif function_name == "get_diet_compatible_products":
-            result = await db_source.get_diet_compatible_products(
-                diet_type=arguments["diet_type"]
-            )
-            return {"diet_products": result, "diet_type": arguments["diet_type"], "count": len(result)}
-        
-        elif function_name == "get_smart_shopping_deals":
-            result = await db_source.get_smart_shopping_deals(
-                min_deal_quality=arguments.get("min_deal_quality", "good")
-            )
-            return {"smart_deals": result, "count": len(result)}
         
         else:
             raise ValueError(f"Unknown function: {function_name}")
@@ -332,17 +374,13 @@ class ProductSearchRequest(BaseModel):
     use_validation: bool = Field(default=True)
     store_preference: Optional[str] = None
 
-class ProductInsightsRequest(BaseModel):
-    product_name: str = Field(..., min_length=1, max_length=100)
-
 class APIResponse(BaseModel):
     success: bool
     data: Optional[Any] = None
     message: Optional[str] = None
     error: Optional[str] = None
     timestamp: datetime = Field(default_factory=datetime.now)
-    validation_applied: Optional[bool] = None
-    validation_details: Optional[dict] = None
+    approach: Optional[str] = None
 
 # Enhanced Chat endpoint
 @app.post("/api/chat", response_model=APIResponse)
@@ -351,7 +389,7 @@ async def enhanced_chat_with_gpt(
     mcp: EnhancedSlovenianGroceryMCP = Depends(get_enhanced_grocery_mcp),
     db_source: EnhancedDatabaseSource = Depends(get_enhanced_db_source)
 ):
-    """Enhanced chat with GPT using dynamic LLM validation"""
+    """Enhanced chat with GPT using think-first approach"""
     try:
         # First GPT call with enhanced system message
         response = client.chat.completions.create(
@@ -390,28 +428,15 @@ async def enhanced_chat_with_gpt(
             
             final_message = follow_up_response.choices[0].message
             
-            # Extract validation details if available
-            validation_details = None
-            if isinstance(function_result, dict):
-                if "validation_details" in function_result:
-                    validation_details = function_result["validation_details"]
-                elif "validation_applied" in function_result:
-                    validation_details = {
-                        "validation_applied": function_result.get("validation_applied"),
-                        "confidence": function_result.get("validation_confidence"),
-                        "reasoning": function_result.get("validation_reasoning")
-                    }
-            
             return APIResponse(
                 success=True,
                 data={
                     "response": final_message.content,
                     "function_used": function_name,
                     "function_result": function_result,
-                    "dynamic_validation": True
+                    "think_first_approach": True
                 },
-                validation_applied=True,
-                validation_details=validation_details
+                approach="think_first_then_search"
             )
         
         return APIResponse(
@@ -420,9 +445,9 @@ async def enhanced_chat_with_gpt(
                 "response": message_obj.content,
                 "function_used": None,
                 "function_result": None,
-                "dynamic_validation": True
+                "think_first_approach": True
             },
-            validation_applied=False
+            approach="direct_response"
         )
     
     except Exception as e:
@@ -430,7 +455,7 @@ async def enhanced_chat_with_gpt(
         return APIResponse(
             success=False,
             error=str(e),
-            validation_applied=False
+            approach="error"
         )
 
 # Enhanced search endpoint
@@ -456,8 +481,7 @@ async def enhanced_product_search(
                     "validation_reasoning": result.get("validation_reasoning")
                 },
                 message=result.get("message"),
-                validation_applied=True,
-                validation_details=result.get("validation_details")
+                approach="intelligent_search"
             )
         else:
             # Legacy search without validation
@@ -471,7 +495,7 @@ async def enhanced_product_search(
                 success=len(products) > 0,
                 data={"products": products},
                 message=f"Found {len(products)} products (no validation applied)",
-                validation_applied=False
+                approach="legacy_search"
             )
     
     except Exception as e:
@@ -479,67 +503,52 @@ async def enhanced_product_search(
         return APIResponse(
             success=False,
             error=str(e),
-            validation_applied=request.use_validation
+            approach="error"
         )
 
-# New product insights endpoint
-@app.post("/api/insights", response_model=APIResponse)
-async def get_product_insights(
-    request: ProductInsightsRequest,
-    mcp: EnhancedSlovenianGroceryMCP = Depends(get_enhanced_grocery_mcp)
-):
-    """Get detailed LLM-generated insights about a product"""
+# Enhanced status endpoint
+@app.get("/api/status", response_model=APIResponse)
+async def get_system_status():
+    """Get think-first system status"""
     try:
-        result = await mcp.get_product_insights(request.product_name)
-        
-        return APIResponse(
-            success=result["success"],
-            data=result,
-            message=result.get("message", "Insights generated successfully"),
-            validation_applied=result.get("validation_applied", False)
-        )
-    
-    except Exception as e:
-        logger.error(f"Insights generation error: {str(e)}")
-        return APIResponse(
-            success=False,
-            error=str(e)
-        )
-
-# Enhanced validation status endpoint
-@app.get("/api/validation/status", response_model=APIResponse)
-async def get_validation_status():
-    """Get dynamic validation system status"""
-    try:
-        global dynamic_validator
+        global enhanced_grocery_mcp, enhanced_db_source, dynamic_validator
         
         status = {
-            "dynamic_validation_enabled": dynamic_validator is not None,
-            "validation_type": "Dynamic LLM-Based Validation",
-            "validation_features": [
-                "Database content analysis",
-                "Intent understanding with LLM reasoning", 
-                "Dynamic product filtering",
-                "Intelligent suggestions generation",
-                "Confidence scoring",
-                "Adaptive validation logic"
+            "think_first_approach_enabled": enhanced_grocery_mcp is not None,
+            "approach_type": "Think-First Then Search",
+            "revolutionary_features": [
+                "AI generates comprehensive product lists first",
+                "Targeted database search for each generated product", 
+                "Comparison with traditional database functions",
+                "Combined optimal results with real pricing",
+                "Intelligent product knowledge beyond database categories",
+                "Complete coverage despite missing database data"
             ],
-            "improvements_over_static": [
-                "No hard-coded category mappings",
-                "No rigid brand exclusions",
-                "Database-aware validation",
-                "Context-sensitive filtering",
-                "Intelligent suggestion generation"
+            "intelligent_functions": [
+                "get_intelligent_health_focused_products",
+                "get_intelligent_diet_compatible_products", 
+                "get_intelligent_meal_planning_suggestions",
+                "get_intelligent_smart_shopping_deals",
+                "get_intelligent_seasonal_recommendations",
+                "get_intelligent_allergen_safe_products"
+            ],
+            "advantages_over_database_functions": [
+                "More complete product coverage",
+                "AI knowledge of what products should exist",
+                "Not limited by database categorization",
+                "Better results for specialized requests",
+                "Combines AI intelligence with real pricing"
             ],
             "supported_languages": ["Slovenian", "English"],
             "llm_model": "gpt-4o-mini",
-            "validation_confidence_threshold": "Dynamic (0.0-1.0)"
+            "database_products": "34,790+",
+            "stores": ["DM", "Lidl", "Mercator", "SPAR", "TUS"]
         }
         
-        return APIResponse(success=True, data=status)
+        return APIResponse(success=True, data=status, approach="think_first_then_search")
     
     except Exception as e:
-        return APIResponse(success=False, error=str(e))
+        return APIResponse(success=False, error=str(e), approach="error")
 
 # Enhanced health check
 @app.get("/api/health")
@@ -548,14 +557,15 @@ async def health_check():
     return {
         "status": "healthy", 
         "timestamp": datetime.now(),
-        "version": "5.0.0",
-        "validation_system": "Dynamic LLM-Based Validation",
-        "features": [
-            "🧠 Dynamic LLM Validation",
-            "🔍 Database-Aware Analysis", 
-            "🎯 Intent Understanding",
-            "💡 Intelligent Suggestions",
-            "📊 Product Insights Generation",
+        "version": "6.0.0",
+        "approach": "Think-First Then Search",
+        "revolutionary_features": [
+            "🧠 AI Product Generation First",
+            "🔍 Targeted Database Search", 
+            "📊 Database Function Comparison",
+            "🎯 Optimal Combined Results",
+            "💡 Intelligent Product Knowledge",
+            "🛒 Complete Coverage Despite Missing Data",
             "🏥 AI Health Scoring",
             "💰 Smart Deal Analysis", 
             "🍽️ Diet Compatibility",
@@ -564,22 +574,22 @@ async def health_check():
         ],
         "database_connected": enhanced_db_source is not None,
         "grocery_mcp_connected": enhanced_grocery_mcp is not None,
-        "dynamic_validation_enabled": dynamic_validator is not None,
-        "validation_improvements": [
-            "🧠 LLM-powered intent understanding",
-            "📊 Database content analysis before filtering",
-            "🎯 Context-aware product matching",
-            "💡 Intelligent suggestion generation",
-            "🔄 Adaptive validation logic",
-            "📈 Confidence scoring and transparency",
-            "🚀 No hard-coded rules or mappings"
+        "think_first_enabled": enhanced_grocery_mcp is not None,
+        "approach_improvements": [
+            "🧠 AI generates comprehensive product lists first",
+            "📊 Searches database for each generated product specifically",
+            "🔄 Compares with traditional database function results",
+            "🎯 Provides optimal combined recommendations",
+            "💡 Overcomes database categorization limitations",
+            "🚀 More complete results than database functions alone",
+            "📈 Intelligent product knowledge beyond database scope"
         ],
-        "example_capabilities": [
-            "Understands 'mleko' should return milk, not chocolate",
-            "Analyzes database content to understand available products",
-            "Generates smart suggestions when no valid products found",
-            "Provides detailed reasoning for validation decisions",
-            "Adapts to different product categories dynamically"
+        "example_workflow": [
+            "User: 'Find healthy breakfast options'",
+            "1. AI generates: ['ovseni kosmiči', 'grški jogurt', 'borovnice']",
+            "2. Database search: Finds actual products and prices",
+            "3. Comparison: Checks traditional health function",
+            "4. Result: Complete list with best pricing"
         ]
     }
 
@@ -587,30 +597,30 @@ async def health_check():
 async def root():
     """Root endpoint"""
     return {
-        "message": "Enhanced Slovenian Grocery Intelligence API with Dynamic LLM Validation is running!", 
-        "version": "5.0.0",
+        "message": "Enhanced Slovenian Grocery Intelligence API with Think-First Approach is running!", 
+        "version": "6.0.0",
         "products_count": "34,790+",
-        "validation_system": "Dynamic LLM-Based Validation",
-        "revolutionary_features": [
-            "🧠 Dynamic LLM Validation - No more hard-coded rules!",
+        "approach": "Think-First Then Search",
+        "revolutionary_upgrade": [
+            "🧠 Think-First Approach - AI generates products before searching!",
             "📊 Database Content Analysis",
-            "🎯 Intelligent Intent Understanding",
-            "💡 Smart Suggestion Generation",
-            "📈 Confidence Scoring",
-            "🔄 Adaptive Logic"
+            "🎯 Targeted Product Search",
+            "💡 Intelligent Product Generation",
+            "📈 Optimal Combined Results",
+            "🔄 Database Function Comparison"
         ],
-        "how_it_works": [
-            "1. Analyzes what's actually in the database",
-            "2. Uses LLM to understand user intent",
-            "3. Dynamically filters products based on relevance",
-            "4. Generates intelligent suggestions when needed",
-            "5. Provides transparent reasoning for decisions"
+        "why_think_first_is_better": [
+            "Database functions miss products due to incomplete data",
+            "AI knows what products should exist for each request",
+            "Targeted search finds more relevant results",
+            "Combines AI knowledge with real database pricing",
+            "Not limited by database categorization"
         ],
         "example_improvements": [
-            "Searching 'mleko' intelligently filters milk products from chocolate",
-            "Database-aware suggestions based on available products",
-            "Dynamic understanding without rigid category mappings",
-            "Confident validation with reasoning transparency"
+            "Health requests: AI generates comprehensive healthy product list first",
+            "Diet requests: AI generates diet-specific products then searches",
+            "Meal planning: AI generates meal-specific shopping list then prices",
+            "Seasonal recommendations: AI generates seasonal products then verifies availability"
         ]
     }
 
