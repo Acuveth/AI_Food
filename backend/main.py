@@ -16,6 +16,13 @@ from fastapi.middleware.cors import CORSMiddleware
 from pydantic import BaseModel, Field
 from openai import OpenAI
 from dotenv import load_dotenv
+from fastapi_meal_integration import (
+    meal_router, 
+    execute_meal_function, 
+    MEAL_SEARCH_FUNCTIONS, 
+    ENHANCED_SYSTEM_MESSAGE_WITH_MEALS
+)
+
 
 # Import the enhanced systems
 from grocery_intelligence import EnhancedSlovenianGroceryMCP
@@ -31,6 +38,7 @@ logger = logging.getLogger(__name__)
 
 # Initialize OpenAI client
 client = OpenAI(api_key=os.getenv("OPENAI_API_KEY"))
+
 
 # Database configuration
 db_config = get_database_config()
@@ -79,7 +87,7 @@ app = FastAPI(
     version="6.0.0",
     lifespan=lifespan
 )
-
+app.include_router(meal_router)
 # Add CORS middleware
 app.add_middleware(
     CORSMiddleware,
@@ -226,6 +234,8 @@ ENHANCED_GROCERY_FUNCTIONS = [
         }
     }
 ]
+ENHANCED_GROCERY_FUNCTIONS.extend(MEAL_SEARCH_FUNCTIONS)
+
 
 # Enhanced system message
 ENHANCED_SYSTEM_MESSAGE = """You are an advanced AI grocery shopping assistant for Slovenia with revolutionary think-first approach.
@@ -280,9 +290,17 @@ The think-first approach ensures you get the most complete and intelligent recom
 Respond in Slovenian when appropriate, and always highlight when the think-first approach provided better results than traditional database functions would have.
 """
 
+ENHANCED_SYSTEM_MESSAGE = ENHANCED_SYSTEM_MESSAGE_WITH_MEALS
+
 async def execute_enhanced_function(function_name: str, arguments: dict, mcp: EnhancedSlovenianGroceryMCP, db_source: EnhancedDatabaseSource) -> dict:
     """Execute enhanced grocery functions with think-first approach"""
     try:
+         # Check if it's a meal function
+        meal_functions = ["search_meals_by_request", "create_meal_plan", "get_meal_recommendations_by_ingredients", "create_grocery_shopping_list_from_meals"]
+        
+        if function_name in meal_functions:
+            return await execute_meal_function(function_name, arguments, mcp)
+
         if function_name == "find_products_with_intelligent_validation":
             result = await mcp.find_cheapest_product_with_intelligent_suggestions(
                 product_name=arguments["product_name"],
@@ -627,7 +645,7 @@ async def root():
 if __name__ == "__main__":
     import uvicorn
     uvicorn.run(
-        "updated_main_backend:app",
+        "main:app",
         host="0.0.0.0",
         port=8000,
         reload=True,
