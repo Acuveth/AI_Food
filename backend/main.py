@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 """
-FastAPI Backend for Slovenian Grocery Intelligence
-Integrated with real database and grocery intelligence system
+Enhanced FastAPI Backend for Slovenian Grocery Intelligence
+AI-aware assistant with comprehensive database knowledge
 """
 
 import os
@@ -11,14 +11,15 @@ from typing import List, Optional, Any
 from datetime import datetime
 from contextlib import asynccontextmanager
 
-from fastapi import FastAPI, HTTPException, Depends
+from fastapi import FastAPI, HTTPException, Depends, Query
 from fastapi.middleware.cors import CORSMiddleware
 from pydantic import BaseModel, Field
 from openai import OpenAI
 from dotenv import load_dotenv
 
-# Import the grocery intelligence system
+# Import the enhanced systems
 from grocery_intelligence import SlovenianGroceryMCP
+from database_source import EnhancedDatabaseSource, get_database_config
 
 # Load environment variables
 load_dotenv()
@@ -31,159 +32,72 @@ logger = logging.getLogger(__name__)
 client = OpenAI(api_key=os.getenv("OPENAI_API_KEY"))
 
 # Database configuration
-db_config = {
-    'host': os.getenv('DB_HOST', 'localhost'),
-    'database': os.getenv('DB_DATABASE', 'ai_food'),
-    'user': os.getenv('DB_USER', 'root'),
-    'password': os.getenv('DB_PASSWORD', 'root'),
-    'port': int(os.getenv('DB_PORT', 3306)),
-    'charset': 'utf8mb4',
-    'autocommit': True
-}
+db_config = get_database_config()
 
-# Global grocery MCP instance
+# Global instances
 grocery_mcp = None
+enhanced_db_source = None
 
 @asynccontextmanager
 async def lifespan(app: FastAPI):
     """Application lifespan manager"""
-    global grocery_mcp
+    global grocery_mcp, enhanced_db_source
     
     # Startup
-    logger.info("🚀 Starting Slovenian Grocery Intelligence API...")
+    logger.info("🚀 Starting Enhanced Slovenian Grocery Intelligence API...")
+    
+    # Initialize grocery MCP
     grocery_mcp = SlovenianGroceryMCP(db_config)
     await grocery_mcp.connect_db()
-    logger.info("✅ Database connected successfully")
+    logger.info("✅ Grocery MCP connected successfully")
+    
+    # Initialize enhanced database source
+    enhanced_db_source = EnhancedDatabaseSource(db_config)
+    await enhanced_db_source.connect()
+    logger.info("✅ Enhanced database source connected successfully")
     
     yield
     
     # Shutdown
-    logger.info("🔄 Shutting down Slovenian Grocery Intelligence API...")
+    logger.info("🔄 Shutting down Enhanced Slovenian Grocery Intelligence API...")
     if grocery_mcp:
         grocery_mcp.disconnect_db()
+    if enhanced_db_source:
+        enhanced_db_source.disconnect()
     logger.info("✅ Shutdown complete")
 
 # Create FastAPI app
 app = FastAPI(
-    title="Slovenian Grocery Intelligence API",
-    description="AI-powered grocery shopping assistant for Slovenia",
-    version="2.0.0",
+    title="Enhanced Slovenian Grocery Intelligence API",
+    description="AI-powered grocery shopping assistant with comprehensive product intelligence",
+    version="3.0.0",
     lifespan=lifespan
 )
 
 # Add CORS middleware
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=["http://localhost:3000"],  # React dev server
+    allow_origins=["http://localhost:3000", "http://127.0.0.1:3000"],
     allow_credentials=True,
     allow_methods=["*"],
     allow_headers=["*"],
 )
 
-# Pydantic models
-class ChatMessage(BaseModel):
-    message: str = Field(..., min_length=1, max_length=1000)
-    model: str = Field(default="gpt-3.5-turbo")
-
-class ProductSearchRequest(BaseModel):
-    product_name: str = Field(..., min_length=1, max_length=100)
-    location: str = Field(default="Ljubljana")
-    store_preference: Optional[str] = None
-
-class PriceComparisonRequest(BaseModel):
-    product_name: str = Field(..., min_length=1, max_length=100)
-    stores: Optional[List[str]] = None
-
-class ShoppingListRequest(BaseModel):
-    budget: float = Field(..., gt=0, le=1000)
-    meal_type: str = Field(..., pattern="^(breakfast|lunch|dinner|snack)$")
-    people_count: int = Field(..., ge=1, le=20)
-    dietary_restrictions: Optional[List[str]] = None
-
-class PromotionsRequest(BaseModel):
-    store: Optional[str] = None
-    category: Optional[str] = None
-    min_discount: int = Field(default=10, ge=0, le=100)
-
-class WeeklyMealPlanRequest(BaseModel):
-    budget: float = Field(..., gt=0, le=2000)
-    people_count: int = Field(..., ge=1, le=20)
-
-class APIResponse(BaseModel):
-    success: bool
-    data: Optional[Any] = None
-    message: Optional[str] = None
-    error: Optional[str] = None
-    timestamp: datetime = Field(default_factory=datetime.now)
-
-# Dependency to get grocery MCP instance
-async def get_grocery_mcp() -> SlovenianGroceryMCP:
-    """Get grocery MCP instance"""
-    if not grocery_mcp:
-        raise HTTPException(status_code=500, detail="Grocery system not initialized")
-    return grocery_mcp
-
-# OpenAI function definitions
-GROCERY_FUNCTIONS = [
+# Enhanced OpenAI function definitions with AI database features
+ENHANCED_GROCERY_FUNCTIONS = [
     {
         "type": "function",
         "function": {
-            "name": "find_cheapest_product",
-            "description": "Find the cheapest version of a product across all Slovenian stores",
+            "name": "get_health_focused_recommendations",
+            "description": "Get health-focused product recommendations with AI health scoring, nutrition grades, and dietary analysis",
             "parameters": {
                 "type": "object",
                 "properties": {
-                    "product_name": {"type": "string", "description": "Product name to search for"},
-                    "location": {"type": "string", "description": "Location to search in", "default": "Ljubljana"},
-                    "store_preference": {"type": "string", "description": "Preferred store (optional)"}
-                },
-                "required": ["product_name"]
-            }
-        }
-    },
-    {
-        "type": "function",
-        "function": {
-            "name": "compare_prices",
-            "description": "Compare prices of a product across multiple stores",
-            "parameters": {
-                "type": "object",
-                "properties": {
-                    "product_name": {"type": "string", "description": "Product name to compare"},
-                    "stores": {"type": "array", "items": {"type": "string"}, "description": "List of stores to compare (optional)"}
-                },
-                "required": ["product_name"]
-            }
-        }
-    },
-    {
-        "type": "function",
-        "function": {
-            "name": "create_budget_shopping_list",
-            "description": "Create a budget-optimized shopping list",
-            "parameters": {
-                "type": "object",
-                "properties": {
-                    "budget": {"type": "number", "description": "Budget in EUR"},
-                    "meal_type": {"type": "string", "enum": ["breakfast", "lunch", "dinner", "snack"]},
-                    "people_count": {"type": "integer", "description": "Number of people", "default": 1},
-                    "dietary_restrictions": {"type": "array", "items": {"type": "string"}, "description": "Dietary restrictions (optional)"}
-                },
-                "required": ["budget", "meal_type"]
-            }
-        }
-    },
-    {
-        "type": "function",
-        "function": {
-            "name": "get_current_promotions",
-            "description": "Get current promotions and discounts",
-            "parameters": {
-                "type": "object",
-                "properties": {
-                    "store": {"type": "string", "description": "Specific store (optional)"},
-                    "category": {"type": "string", "description": "Product category (optional)"},
-                    "min_discount": {"type": "integer", "description": "Minimum discount percentage", "default": 10}
+                    "min_health_score": {"type": "integer", "description": "Minimum health score (0-10)", "default": 7},
+                    "nutrition_grade": {"type": "string", "description": "Preferred nutrition grade (A, B, C, D, E)", "default": "any"},
+                    "max_sugar": {"type": "string", "description": "Maximum sugar level (low, medium, high)", "default": "any"},
+                    "max_sodium": {"type": "string", "description": "Maximum sodium level (low, medium, high)", "default": "any"},
+                    "organic_only": {"type": "boolean", "description": "Only organic products", "default": False}
                 },
                 "required": []
             }
@@ -192,22 +106,57 @@ GROCERY_FUNCTIONS = [
     {
         "type": "function",
         "function": {
-            "name": "get_store_availability",
-            "description": "Check which stores have a specific product",
+            "name": "get_diet_compatible_products",
+            "description": "Find products compatible with specific diets using AI dietary analysis",
             "parameters": {
                 "type": "object",
                 "properties": {
-                    "product_name": {"type": "string", "description": "Product name to check"}
+                    "diet_type": {"type": "string", "description": "Diet type (vegan, vegetarian, keto, gluten-free, paleo, etc.)"},
+                    "avoid_allergens": {"type": "array", "items": {"type": "string"}, "description": "Allergens to avoid"},
+                    "min_health_score": {"type": "integer", "description": "Minimum health score", "default": 5}
                 },
-                "required": ["product_name"]
+                "required": ["diet_type"]
             }
         }
     },
     {
         "type": "function",
         "function": {
-            "name": "get_ai_insights",
-            "description": "Get AI insights and analysis for a product",
+            "name": "get_smart_shopping_deals",
+            "description": "Get intelligent shopping deals based on AI deal quality analysis, value ratings, and purchase recommendations",
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "min_deal_quality": {"type": "string", "enum": ["excellent", "good", "fair"], "description": "Minimum deal quality", "default": "good"},
+                    "stockup_worthy": {"type": "boolean", "description": "Only products worth stocking up on", "default": False},
+                    "bulk_discount_worthy": {"type": "boolean", "description": "Only products good for bulk buying", "default": False}
+                },
+                "required": []
+            }
+        }
+    },
+    {
+        "type": "function",
+        "function": {
+            "name": "get_meal_planning_suggestions",
+            "description": "Get intelligent meal planning suggestions with pairing recommendations, preparation tips, and recipe compatibility",
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "meal_category": {"type": "string", "enum": ["breakfast", "lunch", "dinner", "snack"], "description": "Meal category"},
+                    "max_prep_complexity": {"type": "string", "enum": ["simple", "moderate", "complex"], "description": "Maximum preparation complexity", "default": "moderate"},
+                    "cuisine_type": {"type": "string", "description": "Cuisine type or recipe style"},
+                    "budget_per_person": {"type": "number", "description": "Budget per person in EUR"}
+                },
+                "required": []
+            }
+        }
+    },
+    {
+        "type": "function",
+        "function": {
+            "name": "get_comprehensive_product_analysis",
+            "description": "Get comprehensive AI analysis for specific products including health, value, environmental impact, and usage suggestions",
             "parameters": {
                 "type": "object",
                 "properties": {
@@ -220,28 +169,58 @@ GROCERY_FUNCTIONS = [
     {
         "type": "function",
         "function": {
-            "name": "suggest_meal_from_promotions",
-            "description": "Suggest a meal based on current promotions",
+            "name": "get_environmental_recommendations",
+            "description": "Get environmentally-friendly product recommendations with sustainability scoring",
             "parameters": {
                 "type": "object",
                 "properties": {
-                    "budget": {"type": "number", "description": "Budget in EUR"},
-                    "meal_type": {"type": "string", "enum": ["breakfast", "lunch", "dinner"]},
-                    "people_count": {"type": "integer", "description": "Number of people", "default": 1}
+                    "min_env_score": {"type": "integer", "description": "Minimum environmental score (0-10)", "default": 6},
+                    "organic_preferred": {"type": "boolean", "description": "Prefer organic products", "default": True},
+                    "minimal_processing": {"type": "boolean", "description": "Prefer minimally processed foods", "default": True}
                 },
-                "required": ["budget", "meal_type"]
+                "required": []
             }
         }
     },
     {
         "type": "function",
         "function": {
-            "name": "get_nutrition_analysis",
-            "description": "Get nutrition analysis for a product",
+            "name": "get_seasonal_recommendations",
+            "description": "Get seasonal product recommendations based on freshness and seasonal availability",
             "parameters": {
                 "type": "object",
                 "properties": {
-                    "product_name": {"type": "string", "description": "Product name to analyze"}
+                    "season": {"type": "string", "description": "Season (spring, summer, autumn, winter) or current"},
+                    "freshness_priority": {"type": "boolean", "description": "Prioritize freshness", "default": True}
+                },
+                "required": []
+            }
+        }
+    },
+    {
+        "type": "function",
+        "function": {
+            "name": "get_storage_and_usage_tips",
+            "description": "Get detailed storage tips, shelf life information, and creative usage suggestions for products",
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "product_name": {"type": "string", "description": "Product name to get tips for"}
+                },
+                "required": ["product_name"]
+            }
+        }
+    },
+    {
+        "type": "function",
+        "function": {
+            "name": "find_cheapest_product",
+            "description": "Find the cheapest version of a product across all stores with AI value analysis",
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "product_name": {"type": "string", "description": "Product name to search for"},
+                    "include_ai_analysis": {"type": "boolean", "description": "Include AI value and quality analysis", "default": True}
                 },
                 "required": ["product_name"]
             }
@@ -249,60 +228,138 @@ GROCERY_FUNCTIONS = [
     }
 ]
 
-async def execute_grocery_function(function_name: str, arguments: dict, mcp: SlovenianGroceryMCP) -> dict:
-    """Execute grocery functions with error handling"""
+# Enhanced system message with comprehensive database knowledge
+ENHANCED_SYSTEM_MESSAGE = """You are an advanced AI grocery shopping assistant for Slovenia with access to a comprehensive database of 34,790+ products from major stores (DM, Mercator, SPAR, TUS, LIDL). 
+
+🤖 **Your Database Knowledge:**
+You have access to incredibly detailed AI-enhanced product data including:
+
+**Health & Nutrition Intelligence:**
+- ai_health_score (0-10): Overall health rating for each product
+- ai_nutrition_grade (A-E): Traffic light nutrition scoring
+- ai_sugar_content, ai_sodium_level: Detailed nutritional analysis
+- ai_additive_score: Food additive safety assessment
+- ai_processing_level: How processed foods are (minimal/moderate/high)
+
+**Dietary & Allergen Analysis:**
+- ai_diet_compatibility: Compatible diets (vegan, vegetarian, keto, gluten-free, etc.)
+- ai_allergen_list: Detailed allergen information
+- ai_allergen_risk: Risk level assessment (low/medium/high)
+- ai_organic_verified: Certified organic status
+
+**Smart Shopping Intelligence:**
+- ai_value_rating: Value for money assessment (excellent/good/fair/poor)
+- ai_deal_quality: How good current deals are
+- ai_price_tier: Price category (budget/mid-range/premium)
+- ai_stockup_recommendation: Whether to buy in bulk
+- ai_optimal_quantity: Recommended purchase amount
+- ai_replacement_urgency: How urgently items need replacing
+
+**Culinary & Usage Intelligence:**
+- ai_pairing_suggestions: What foods pair well together
+- ai_recipe_compatibility: Recipe types products work in
+- ai_preparation_complexity: How complex to prepare (simple/moderate/complex)
+- ai_preparation_tips: Detailed cooking/prep instructions
+- ai_usage_suggestions: Creative ways to use products
+- ai_meal_category: Best meal timing (breakfast/lunch/dinner/snack)
+
+**Storage & Freshness Intelligence:**
+- ai_storage_requirements: Optimal storage conditions
+- ai_shelf_life_estimate: Expected shelf life in days
+- ai_freshness_indicator: Current freshness status
+- ai_seasonal_availability: Best seasons for products
+
+**Environmental Intelligence:**
+- ai_environmental_score (0-10): Environmental impact rating
+- ai_organic_verified: Organic certification status
+
+🎯 **How to Help Users:**
+
+**For Health Queries:** Use health scores, nutrition grades, sugar/sodium levels, and processing information
+**For Diet Queries:** Leverage diet compatibility and allergen analysis 
+**For Budget Queries:** Use value ratings, deal quality, and smart shopping recommendations
+**For Cooking Queries:** Provide pairing suggestions, recipe compatibility, and preparation tips
+**For Storage Queries:** Share storage requirements, shelf life, and freshness information
+**For Environmental Queries:** Use environmental scores and organic verification
+
+**Always:**
+- Provide specific product recommendations with store names and prices in EUR
+- Include relevant AI insights (health scores, value ratings, etc.)
+- Suggest optimal quantities and storage tips when helpful
+- Mention seasonal availability and freshness when relevant
+- Highlight great deals and explain why they're good value
+- Consider dietary restrictions and allergen safety
+- Provide actionable shopping and cooking advice
+
+You're not just finding prices - you're providing intelligent, comprehensive grocery guidance based on deep product analysis!
+
+Respond in Slovenian when appropriate, and always prioritize user health, value, and satisfaction.
+"""
+
+async def execute_enhanced_function(function_name: str, arguments: dict, mcp: SlovenianGroceryMCP, db_source: EnhancedDatabaseSource) -> dict:
+    """Execute enhanced grocery functions with comprehensive AI analysis"""
     try:
-        if function_name == "find_cheapest_product":
-            result = await mcp.find_cheapest_product(
-                arguments["product_name"],
-                arguments.get("location", "Ljubljana"),
-                arguments.get("store_preference")
+        if function_name == "get_health_focused_recommendations":
+            result = await db_source.get_health_focused_products(
+                min_health_score=arguments.get("min_health_score", 7)
             )
-            return {"products": result}
+            return {"health_products": result, "count": len(result)}
         
-        elif function_name == "compare_prices":
-            result = await mcp.compare_prices(
-                arguments["product_name"],
-                arguments.get("stores")
+        elif function_name == "get_diet_compatible_products":
+            result = await db_source.get_diet_compatible_products(
+                diet_type=arguments["diet_type"]
             )
-            return {"comparison": result}
+            return {"diet_products": result, "diet_type": arguments["diet_type"], "count": len(result)}
         
-        elif function_name == "create_budget_shopping_list":
-            result = await mcp.create_budget_shopping_list(
-                arguments["budget"],
-                arguments["meal_type"],
-                arguments.get("people_count", 1),
-                arguments.get("dietary_restrictions")
+        elif function_name == "get_smart_shopping_deals":
+            result = await db_source.get_smart_shopping_deals(
+                min_deal_quality=arguments.get("min_deal_quality", "good")
             )
-            return {"shopping_list": result}
+            return {"smart_deals": result, "count": len(result)}
         
-        elif function_name == "get_current_promotions":
-            result = await mcp.get_current_promotions(
-                arguments.get("store"),
-                arguments.get("category"),
-                arguments.get("min_discount", 10)
+        elif function_name == "get_meal_planning_suggestions":
+            result = await db_source.get_meal_planning_suggestions(
+                meal_category=arguments.get("meal_category"),
+                max_prep_complexity=arguments.get("max_prep_complexity", "moderate")
             )
-            return {"promotions": result}
+            return {"meal_suggestions": result, "count": len(result)}
         
-        elif function_name == "get_store_availability":
-            result = await mcp.get_store_availability(arguments["product_name"])
-            return {"availability": result}
-        
-        elif function_name == "get_ai_insights":
-            result = await mcp.get_ai_insights(arguments["product_name"])
-            return {"insights": result}
-        
-        elif function_name == "suggest_meal_from_promotions":
-            result = await mcp.suggest_meal_from_promotions(
-                arguments["budget"],
-                arguments["meal_type"],
-                arguments.get("people_count", 1)
+        elif function_name == "get_comprehensive_product_analysis":
+            result = await db_source.get_comprehensive_product_analysis(
+                product_name=arguments["product_name"]
             )
-            return {"meal_suggestion": result}
+            return {"product_analysis": result, "product": arguments["product_name"], "count": len(result)}
         
-        elif function_name == "get_nutrition_analysis":
-            result = await mcp.get_nutrition_analysis(arguments["product_name"])
-            return {"nutrition": result}
+        elif function_name == "get_environmental_recommendations":
+            result = await db_source.get_environmental_impact_analysis(
+                min_env_score=arguments.get("min_env_score", 6)
+            )
+            return {"eco_products": result, "count": len(result)}
+        
+        elif function_name == "get_seasonal_recommendations":
+            result = await db_source.get_seasonal_recommendations(
+                season=arguments.get("season")
+            )
+            return {"seasonal_products": result, "count": len(result)}
+        
+        elif function_name == "get_storage_and_usage_tips":
+            result = await db_source.get_storage_and_freshness_tips(
+                product_name=arguments["product_name"]
+            )
+            return {"storage_tips": result, "product": arguments["product_name"], "count": len(result)}
+        
+        elif function_name == "find_cheapest_product":
+            # Use the original MCP function but enhance with AI data
+            result = await mcp.find_cheapest_product(arguments["product_name"])
+            
+            # Also get AI analysis
+            ai_analysis = await db_source.get_comprehensive_product_analysis(arguments["product_name"])
+            
+            return {
+                "products": result, 
+                "ai_analysis": ai_analysis[:3],  # Top 3 AI analyses
+                "product_name": arguments["product_name"]
+            }
         
         else:
             raise ValueError(f"Unknown function: {function_name}")
@@ -311,36 +368,48 @@ async def execute_grocery_function(function_name: str, arguments: dict, mcp: Slo
         logger.error(f"Error executing function {function_name}: {str(e)}")
         raise HTTPException(status_code=500, detail=f"Function execution failed: {str(e)}")
 
-# API Routes
+# Dependencies
+async def get_grocery_mcp() -> SlovenianGroceryMCP:
+    """Get grocery MCP instance"""
+    if not grocery_mcp:
+        raise HTTPException(status_code=500, detail="Grocery system not initialized")
+    return grocery_mcp
+
+async def get_enhanced_db_source() -> EnhancedDatabaseSource:
+    """Get enhanced database source instance"""
+    if not enhanced_db_source:
+        raise HTTPException(status_code=500, detail="Enhanced database source not initialized")
+    return enhanced_db_source
+
+# Pydantic models
+class ChatMessage(BaseModel):
+    message: str = Field(..., min_length=1, max_length=1000)
+    model: str = Field(default="gpt-3.5-turbo")
+
+class APIResponse(BaseModel):
+    success: bool
+    data: Optional[Any] = None
+    message: Optional[str] = None
+    error: Optional[str] = None
+    timestamp: datetime = Field(default_factory=datetime.now)
+
+# Enhanced Chat endpoint with AI database features
 @app.post("/api/chat", response_model=APIResponse)
-async def chat_with_gpt(
+async def enhanced_chat_with_gpt(
     message: ChatMessage,
-    mcp: SlovenianGroceryMCP = Depends(get_grocery_mcp)
+    mcp: SlovenianGroceryMCP = Depends(get_grocery_mcp),
+    db_source: EnhancedDatabaseSource = Depends(get_enhanced_db_source)
 ):
-    """Chat with GPT using grocery functions"""
+    """Enhanced chat with GPT using comprehensive AI grocery intelligence"""
     try:
-        system_message = """You are a helpful Slovenian grocery shopping assistant. You have access to real-time pricing data from major stores in Slovenia: DM, Mercator, SPAR, TUS, and LIDL.
-
-You can help users:
-- Find the cheapest products across all stores
-- Compare prices between stores
-- Create budget-optimized shopping lists
-- Find current promotions and discounts
-- Check store availability
-- Get AI insights about products
-- Suggest meals based on promotions
-- Get nutrition analysis
-
-Always provide prices in EUR and mention specific stores. Be helpful and focus on saving money. When users ask about products, use the available functions to get current data. Respond in Slovenian when appropriate."""
-
-        # First GPT call
+        # First GPT call with enhanced system message
         response = client.chat.completions.create(
             model=message.model,
             messages=[
-                {"role": "system", "content": system_message},
+                {"role": "system", "content": ENHANCED_SYSTEM_MESSAGE},
                 {"role": "user", "content": message.message}
             ],
-            tools=GROCERY_FUNCTIONS,
+            tools=ENHANCED_GROCERY_FUNCTIONS,
             tool_choice="auto"
         )
         
@@ -352,19 +421,19 @@ Always provide prices in EUR and mention specific stores. Be helpful and focus o
             function_name = tool_call.function.name
             function_args = json.loads(tool_call.function.arguments)
             
-            # Execute the function
-            function_result = await execute_grocery_function(function_name, function_args, mcp)
+            # Execute the enhanced function
+            function_result = await execute_enhanced_function(function_name, function_args, mcp, db_source)
             
             # Second GPT call with function result
             follow_up_response = client.chat.completions.create(
                 model=message.model,
                 messages=[
-                    {"role": "system", "content": system_message},
+                    {"role": "system", "content": ENHANCED_SYSTEM_MESSAGE},
                     {"role": "user", "content": message.message},
                     {"role": "assistant", "content": message_obj.content, "tool_calls": message_obj.tool_calls},
                     {"role": "tool", "tool_call_id": tool_call.id, "content": json.dumps(function_result)}
                 ],
-                tools=GROCERY_FUNCTIONS,
+                tools=ENHANCED_GROCERY_FUNCTIONS,
                 tool_choice="auto"
             )
             
@@ -374,7 +443,8 @@ Always provide prices in EUR and mention specific stores. Be helpful and focus o
                 data={
                     "response": final_message.content,
                     "function_used": function_name,
-                    "function_result": function_result
+                    "function_result": function_result,
+                    "ai_enhanced": True
                 }
             )
         
@@ -383,217 +453,121 @@ Always provide prices in EUR and mention specific stores. Be helpful and focus o
             data={
                 "response": message_obj.content,
                 "function_used": None,
-                "function_result": None
+                "function_result": None,
+                "ai_enhanced": True
             }
         )
     
     except Exception as e:
-        logger.error(f"Chat error: {str(e)}")
+        logger.error(f"Enhanced chat error: {str(e)}")
         return APIResponse(
             success=False,
             error=str(e)
         )
 
-@app.post("/api/search", response_model=APIResponse)
-async def search_products(
-    request: ProductSearchRequest,
-    mcp: SlovenianGroceryMCP = Depends(get_grocery_mcp)
+# New enhanced endpoints
+@app.get("/api/enhanced/health-products", response_model=APIResponse)
+async def get_health_products(
+    min_health_score: int = Query(default=7, ge=0, le=10),
+    db_source: EnhancedDatabaseSource = Depends(get_enhanced_db_source)
 ):
-    """Search for products"""
+    """Get health-focused products"""
     try:
-        results = await mcp.find_cheapest_product(
-            request.product_name,
-            request.location,
-            request.store_preference
-        )
-        return APIResponse(
-            success=True,
-            data={"products": results}
-        )
+        products = await db_source.get_health_focused_products(min_health_score)
+        return APIResponse(success=True, data={"products": products, "count": len(products)})
     except Exception as e:
-        logger.error(f"Search error: {str(e)}")
-        return APIResponse(
-            success=False,
-            error=str(e)
-        )
+        return APIResponse(success=False, error=str(e))
 
-@app.post("/api/compare", response_model=APIResponse)
-async def compare_prices(
-    request: PriceComparisonRequest,
-    mcp: SlovenianGroceryMCP = Depends(get_grocery_mcp)
+@app.get("/api/enhanced/diet/{diet_type}", response_model=APIResponse)
+async def get_diet_products(
+    diet_type: str,
+    db_source: EnhancedDatabaseSource = Depends(get_enhanced_db_source)
 ):
-    """Compare prices across stores"""
+    """Get products for specific diet"""
     try:
-        results = await mcp.compare_prices(request.product_name, request.stores)
-        return APIResponse(
-            success=True,
-            data={"comparison": results}
-        )
+        products = await db_source.get_diet_compatible_products(diet_type)
+        return APIResponse(success=True, data={"products": products, "diet": diet_type, "count": len(products)})
     except Exception as e:
-        logger.error(f"Comparison error: {str(e)}")
-        return APIResponse(
-            success=False,
-            error=str(e)
-        )
+        return APIResponse(success=False, error=str(e))
 
-@app.post("/api/shopping-list", response_model=APIResponse)
-async def create_shopping_list(
-    request: ShoppingListRequest,
-    mcp: SlovenianGroceryMCP = Depends(get_grocery_mcp)
+@app.get("/api/enhanced/smart-deals", response_model=APIResponse)
+async def get_smart_deals(
+    min_quality: str = Query(default="good", regex="^(excellent|good|fair)$"),
+    db_source: EnhancedDatabaseSource = Depends(get_enhanced_db_source)
 ):
-    """Create budget shopping list"""
+    """Get smart shopping deals"""
     try:
-        results = await mcp.create_budget_shopping_list(
-            request.budget,
-            request.meal_type,
-            request.people_count,
-            request.dietary_restrictions
-        )
-        return APIResponse(
-            success=True,
-            data={"shopping_list": results}
-        )
+        deals = await db_source.get_smart_shopping_deals(min_quality)
+        return APIResponse(success=True, data={"deals": deals, "count": len(deals)})
     except Exception as e:
-        logger.error(f"Shopping list error: {str(e)}")
-        return APIResponse(
-            success=False,
-            error=str(e)
-        )
+        return APIResponse(success=False, error=str(e))
 
-@app.post("/api/promotions", response_model=APIResponse)
-async def get_promotions(
-    request: PromotionsRequest,
-    mcp: SlovenianGroceryMCP = Depends(get_grocery_mcp)
+@app.get("/api/enhanced/environmental", response_model=APIResponse)
+async def get_environmental_products(
+    min_env_score: int = Query(default=6, ge=0, le=10),
+    db_source: EnhancedDatabaseSource = Depends(get_enhanced_db_source)
 ):
-    """Get current promotions"""
+    """Get environmentally-friendly products"""
     try:
-        results = await mcp.get_current_promotions(
-            request.store,
-            request.category,
-            request.min_discount
-        )
-        return APIResponse(
-            success=True,
-            data={"promotions": results}
-        )
+        products = await db_source.get_environmental_impact_analysis(min_env_score)
+        return APIResponse(success=True, data={"products": products, "count": len(products)})
     except Exception as e:
-        logger.error(f"Promotions error: {str(e)}")
-        return APIResponse(
-            success=False,
-            error=str(e)
-        )
+        return APIResponse(success=False, error=str(e))
 
-@app.get("/api/stores/{product_name}", response_model=APIResponse)
-async def check_store_availability(
+@app.get("/api/enhanced/analysis/{product_name}", response_model=APIResponse)
+async def get_product_analysis(
     product_name: str,
-    mcp: SlovenianGroceryMCP = Depends(get_grocery_mcp)
+    db_source: EnhancedDatabaseSource = Depends(get_enhanced_db_source)
 ):
-    """Check store availability"""
+    """Get comprehensive product analysis"""
     try:
-        results = await mcp.get_store_availability(product_name)
-        return APIResponse(
-            success=True,
-            data={"availability": results}
-        )
+        analysis = await db_source.get_comprehensive_product_analysis(product_name)
+        return APIResponse(success=True, data={"analysis": analysis, "product": product_name, "count": len(analysis)})
     except Exception as e:
-        logger.error(f"Store availability error: {str(e)}")
-        return APIResponse(
-            success=False,
-            error=str(e)
-        )
-
-@app.get("/api/insights/{product_name}", response_model=APIResponse)
-async def get_product_insights(
-    product_name: str,
-    mcp: SlovenianGroceryMCP = Depends(get_grocery_mcp)
-):
-    """Get AI insights for product"""
-    try:
-        results = await mcp.get_ai_insights(product_name)
-        return APIResponse(
-            success=True,
-            data={"insights": results}
-        )
-    except Exception as e:
-        logger.error(f"Insights error: {str(e)}")
-        return APIResponse(
-            success=False,
-            error=str(e)
-        )
-
-@app.get("/api/nutrition/{product_name}", response_model=APIResponse)
-async def get_nutrition_analysis(
-    product_name: str,
-    mcp: SlovenianGroceryMCP = Depends(get_grocery_mcp)
-):
-    """Get nutrition analysis for product"""
-    try:
-        results = await mcp.get_nutrition_analysis(product_name)
-        return APIResponse(
-            success=True,
-            data={"nutrition": results}
-        )
-    except Exception as e:
-        logger.error(f"Nutrition analysis error: {str(e)}")
-        return APIResponse(
-            success=False,
-            error=str(e)
-        )
-
-@app.post("/api/meal-suggestion", response_model=APIResponse)
-async def suggest_meal_from_promotions(
-    budget: float,
-    meal_type: str,
-    people_count: int = 1,
-    mcp: SlovenianGroceryMCP = Depends(get_grocery_mcp)
-):
-    """Suggest meal based on promotions"""
-    try:
-        results = await mcp.suggest_meal_from_promotions(budget, meal_type, people_count)
-        return APIResponse(
-            success=True,
-            data={"meal_suggestion": results}
-        )
-    except Exception as e:
-        logger.error(f"Meal suggestion error: {str(e)}")
-        return APIResponse(
-            success=False,
-            error=str(e)
-        )
-
-@app.post("/api/weekly-meal-plan", response_model=APIResponse)
-async def create_weekly_meal_plan(
-    request: WeeklyMealPlanRequest,
-    mcp: SlovenianGroceryMCP = Depends(get_grocery_mcp)
-):
-    """Create weekly meal plan"""
-    try:
-        results = await mcp.get_weekly_meal_plan(request.budget, request.people_count)
-        return APIResponse(
-            success=True,
-            data={"weekly_plan": results}
-        )
-    except Exception as e:
-        logger.error(f"Weekly meal plan error: {str(e)}")
-        return APIResponse(
-            success=False,
-            error=str(e)
-        )
+        return APIResponse(success=False, error=str(e))
 
 @app.get("/api/health")
 async def health_check():
-    """Health check endpoint"""
-    return {"status": "healthy", "timestamp": datetime.now()}
+    """Enhanced health check endpoint"""
+    return {
+        "status": "healthy", 
+        "timestamp": datetime.now(),
+        "version": "3.0.0",
+        "features": [
+            "AI Health Scoring",
+            "Smart Deal Analysis", 
+            "Diet Compatibility",
+            "Environmental Impact",
+            "Meal Planning Intelligence",
+            "Storage & Freshness Tips"
+        ],
+        "database_connected": enhanced_db_source is not None,
+        "grocery_mcp_connected": grocery_mcp is not None,
+        "ai_enhanced": True
+    }
 
 @app.get("/")
 async def root():
     """Root endpoint"""
-    return {"message": "Slovenian Grocery Intelligence API is running!", "version": "2.0.0"}
+    return {
+        "message": "Enhanced Slovenian Grocery Intelligence API with AI Analysis is running!", 
+        "version": "3.0.0",
+        "products_count": "34,790+",
+        "ai_features": [
+            "Health & Nutrition Scoring",
+            "Smart Deal Analysis",
+            "Diet Compatibility Checking", 
+            "Environmental Impact Assessment",
+            "Meal Planning Intelligence",
+            "Storage & Freshness Management",
+            "Value & Quality Analysis"
+        ]
+    }
 
 if __name__ == "__main__":
     import uvicorn
     uvicorn.run(
-        "main:app",
+        "enhanced_main:app",
         host="0.0.0.0",
         port=8000,
         reload=True,
