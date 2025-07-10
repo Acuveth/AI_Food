@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 """
-Enhanced FastAPI Backend for Slovenian Grocery Intelligence
-AI-aware assistant with comprehensive database knowledge
+Enhanced FastAPI Backend with Semantic Validation
+Prevents wrong product matches like "MLEČNA REZINA MILKA" for "mleko" searches
 """
 
 import os
@@ -20,6 +20,7 @@ from dotenv import load_dotenv
 # Import the enhanced systems
 from grocery_intelligence import SlovenianGroceryMCP
 from database_source import EnhancedDatabaseSource, get_database_config
+from semantic_search_validation import SemanticSearchValidator
 
 # Load environment variables
 load_dotenv()
@@ -37,24 +38,29 @@ db_config = get_database_config()
 # Global instances
 grocery_mcp = None
 enhanced_db_source = None
+semantic_validator = None
 
 @asynccontextmanager
 async def lifespan(app: FastAPI):
     """Application lifespan manager"""
-    global grocery_mcp, enhanced_db_source
+    global grocery_mcp, enhanced_db_source, semantic_validator
     
     # Startup
-    logger.info("🚀 Starting Enhanced Slovenian Grocery Intelligence API...")
+    logger.info("🚀 Starting Enhanced Slovenian Grocery Intelligence API with Semantic Validation...")
     
-    # Initialize grocery MCP
+    # Initialize grocery MCP with validation
     grocery_mcp = SlovenianGroceryMCP(db_config)
     await grocery_mcp.connect_db()
-    logger.info("✅ Grocery MCP connected successfully")
+    logger.info("✅ Enhanced Grocery MCP connected successfully")
     
     # Initialize enhanced database source
     enhanced_db_source = EnhancedDatabaseSource(db_config)
     await enhanced_db_source.connect()
     logger.info("✅ Enhanced database source connected successfully")
+    
+    # Initialize semantic validator
+    semantic_validator = SemanticSearchValidator()
+    logger.info("✅ Semantic validator initialized")
     
     yield
     
@@ -69,8 +75,8 @@ async def lifespan(app: FastAPI):
 # Create FastAPI app
 app = FastAPI(
     title="Enhanced Slovenian Grocery Intelligence API",
-    description="AI-powered grocery shopping assistant with comprehensive product intelligence",
-    version="3.0.0",
+    description="AI-powered grocery shopping assistant with semantic validation to prevent wrong product matches",
+    version="4.0.0",
     lifespan=lifespan
 )
 
@@ -83,21 +89,33 @@ app.add_middleware(
     allow_headers=["*"],
 )
 
-# Enhanced OpenAI function definitions with AI database features
+# Enhanced OpenAI function definitions
 ENHANCED_GROCERY_FUNCTIONS = [
     {
         "type": "function",
         "function": {
-            "name": "get_health_focused_recommendations",
-            "description": "Get health-focused product recommendations with AI health scoring, nutrition grades, and dietary analysis",
+            "name": "find_cheapest_product_validated",
+            "description": "Find the cheapest version of a product with semantic validation to ensure correct product matches",
             "parameters": {
                 "type": "object",
                 "properties": {
-                    "min_health_score": {"type": "integer", "description": "Minimum health score (0-10)", "default": 7},
-                    "nutrition_grade": {"type": "string", "description": "Preferred nutrition grade (A, B, C, D, E)", "default": "any"},
-                    "max_sugar": {"type": "string", "description": "Maximum sugar level (low, medium, high)", "default": "any"},
-                    "max_sodium": {"type": "string", "description": "Maximum sodium level (low, medium, high)", "default": "any"},
-                    "organic_only": {"type": "boolean", "description": "Only organic products", "default": False}
+                    "product_name": {"type": "string", "description": "Product name to search for"},
+                    "use_validation": {"type": "boolean", "description": "Whether to apply semantic validation", "default": True},
+                    "store_preference": {"type": "string", "description": "Preferred store (dm, lidl, mercator, spar, tus)"}
+                },
+                "required": ["product_name"]
+            }
+        }
+    },
+    {
+        "type": "function",
+        "function": {
+            "name": "get_health_focused_recommendations",
+            "description": "Get health-focused product recommendations with AI health scoring",
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "min_health_score": {"type": "integer", "description": "Minimum health score (0-10)", "default": 7}
                 },
                 "required": []
             }
@@ -107,13 +125,11 @@ ENHANCED_GROCERY_FUNCTIONS = [
         "type": "function",
         "function": {
             "name": "get_diet_compatible_products",
-            "description": "Find products compatible with specific diets using AI dietary analysis",
+            "description": "Find products compatible with specific diets",
             "parameters": {
                 "type": "object",
                 "properties": {
-                    "diet_type": {"type": "string", "description": "Diet type (vegan, vegetarian, keto, gluten-free, paleo, etc.)"},
-                    "avoid_allergens": {"type": "array", "items": {"type": "string"}, "description": "Allergens to avoid"},
-                    "min_health_score": {"type": "integer", "description": "Minimum health score", "default": 5}
+                    "diet_type": {"type": "string", "description": "Diet type (vegan, vegetarian, keto, etc.)"}
                 },
                 "required": ["diet_type"]
             }
@@ -123,13 +139,11 @@ ENHANCED_GROCERY_FUNCTIONS = [
         "type": "function",
         "function": {
             "name": "get_smart_shopping_deals",
-            "description": "Get intelligent shopping deals based on AI deal quality analysis, value ratings, and purchase recommendations",
+            "description": "Get intelligent shopping deals with AI analysis",
             "parameters": {
                 "type": "object",
                 "properties": {
-                    "min_deal_quality": {"type": "string", "enum": ["excellent", "good", "fair"], "description": "Minimum deal quality", "default": "good"},
-                    "stockup_worthy": {"type": "boolean", "description": "Only products worth stocking up on", "default": False},
-                    "bulk_discount_worthy": {"type": "boolean", "description": "Only products good for bulk buying", "default": False}
+                    "min_deal_quality": {"type": "string", "enum": ["excellent", "good", "fair"], "default": "good"}
                 },
                 "required": []
             }
@@ -138,168 +152,81 @@ ENHANCED_GROCERY_FUNCTIONS = [
     {
         "type": "function",
         "function": {
-            "name": "get_meal_planning_suggestions",
-            "description": "Get intelligent meal planning suggestions with pairing recommendations, preparation tips, and recipe compatibility",
+            "name": "create_validated_shopping_list",
+            "description": "Create a budget shopping list with semantic validation to ensure correct products",
             "parameters": {
                 "type": "object",
                 "properties": {
-                    "meal_category": {"type": "string", "enum": ["breakfast", "lunch", "dinner", "snack"], "description": "Meal category"},
-                    "max_prep_complexity": {"type": "string", "enum": ["simple", "moderate", "complex"], "description": "Maximum preparation complexity", "default": "moderate"},
-                    "cuisine_type": {"type": "string", "description": "Cuisine type or recipe style"},
-                    "budget_per_person": {"type": "number", "description": "Budget per person in EUR"}
+                    "budget": {"type": "number", "description": "Budget in EUR"},
+                    "meal_type": {"type": "string", "enum": ["breakfast", "lunch", "dinner", "snack"], "description": "Type of meal"},
+                    "people_count": {"type": "integer", "description": "Number of people", "default": 1},
+                    "use_validation": {"type": "boolean", "description": "Apply semantic validation", "default": True}
                 },
-                "required": []
-            }
-        }
-    },
-    {
-        "type": "function",
-        "function": {
-            "name": "get_comprehensive_product_analysis",
-            "description": "Get comprehensive AI analysis for specific products including health, value, environmental impact, and usage suggestions",
-            "parameters": {
-                "type": "object",
-                "properties": {
-                    "product_name": {"type": "string", "description": "Product name to analyze"}
-                },
-                "required": ["product_name"]
-            }
-        }
-    },
-    {
-        "type": "function",
-        "function": {
-            "name": "get_environmental_recommendations",
-            "description": "Get environmentally-friendly product recommendations with sustainability scoring",
-            "parameters": {
-                "type": "object",
-                "properties": {
-                    "min_env_score": {"type": "integer", "description": "Minimum environmental score (0-10)", "default": 6},
-                    "organic_preferred": {"type": "boolean", "description": "Prefer organic products", "default": True},
-                    "minimal_processing": {"type": "boolean", "description": "Prefer minimally processed foods", "default": True}
-                },
-                "required": []
-            }
-        }
-    },
-    {
-        "type": "function",
-        "function": {
-            "name": "get_seasonal_recommendations",
-            "description": "Get seasonal product recommendations based on freshness and seasonal availability",
-            "parameters": {
-                "type": "object",
-                "properties": {
-                    "season": {"type": "string", "description": "Season (spring, summer, autumn, winter) or current"},
-                    "freshness_priority": {"type": "boolean", "description": "Prioritize freshness", "default": True}
-                },
-                "required": []
-            }
-        }
-    },
-    {
-        "type": "function",
-        "function": {
-            "name": "get_storage_and_usage_tips",
-            "description": "Get detailed storage tips, shelf life information, and creative usage suggestions for products",
-            "parameters": {
-                "type": "object",
-                "properties": {
-                    "product_name": {"type": "string", "description": "Product name to get tips for"}
-                },
-                "required": ["product_name"]
-            }
-        }
-    },
-    {
-        "type": "function",
-        "function": {
-            "name": "find_cheapest_product",
-            "description": "Find the cheapest version of a product across all stores with AI value analysis",
-            "parameters": {
-                "type": "object",
-                "properties": {
-                    "product_name": {"type": "string", "description": "Product name to search for"},
-                    "include_ai_analysis": {"type": "boolean", "description": "Include AI value and quality analysis", "default": True}
-                },
-                "required": ["product_name"]
+                "required": ["budget", "meal_type"]
             }
         }
     }
 ]
 
-# Enhanced system message with comprehensive database knowledge
-ENHANCED_SYSTEM_MESSAGE = """You are an advanced AI grocery shopping assistant for Slovenia with access to a comprehensive database of 34,790+ products from major stores (DM, Mercator, SPAR, TUS, LIDL). 
+# Enhanced system message
+ENHANCED_SYSTEM_MESSAGE = """You are an advanced AI grocery shopping assistant for Slovenia with semantic validation capabilities.
 
-🤖 **Your Database Knowledge:**
-You have access to incredibly detailed AI-enhanced product data including:
+🤖 **Your Enhanced Capabilities:**
+You now have SEMANTIC VALIDATION that prevents wrong product matches. For example:
+- When user searches for "mleko" (milk), you WON'T return "MLEČNA REZINA MILKA" (chocolate bar)
+- When user searches for "kruh" (bread), you WON'T return breadcrumbs or bread-related items that aren't actual bread
+- When user searches for "jabolka" (apples), you WON'T return apple juice or apple-flavored products
 
-**Health & Nutrition Intelligence:**
-- ai_health_score (0-10): Overall health rating for each product
-- ai_nutrition_grade (A-E): Traffic light nutrition scoring
-- ai_sugar_content, ai_sodium_level: Detailed nutritional analysis
-- ai_additive_score: Food additive safety assessment
-- ai_processing_level: How processed foods are (minimal/moderate/high)
+**Database Access:**
+- 34,790+ products from DM, Mercator, SPAR, TUS, LIDL
+- AI-enhanced with health scores, nutrition grades, value ratings
+- Semantic validation ensures product relevance
 
-**Dietary & Allergen Analysis:**
-- ai_diet_compatibility: Compatible diets (vegan, vegetarian, keto, gluten-free, etc.)
-- ai_allergen_list: Detailed allergen information
-- ai_allergen_risk: Risk level assessment (low/medium/high)
-- ai_organic_verified: Certified organic status
+**Key Features:**
+✅ **Semantic Product Matching** - Only returns products that actually match user intent
+✅ **Search Suggestions** - Provides alternatives when no valid matches found
+✅ **Validation Transparency** - Explains when validation is applied
+✅ **Category Filtering** - Uses AI categories to improve accuracy
 
-**Smart Shopping Intelligence:**
-- ai_value_rating: Value for money assessment (excellent/good/fair/poor)
-- ai_deal_quality: How good current deals are
-- ai_price_tier: Price category (budget/mid-range/premium)
-- ai_stockup_recommendation: Whether to buy in bulk
-- ai_optimal_quantity: Recommended purchase amount
-- ai_replacement_urgency: How urgently items need replacing
+**How to Help Users:**
+1. **Always use validated search** by default for product queries
+2. **Explain validation results** - tell users when validation helped
+3. **Provide suggestions** when no valid products found
+4. **Be transparent** about search quality and matches
 
-**Culinary & Usage Intelligence:**
-- ai_pairing_suggestions: What foods pair well together
-- ai_recipe_compatibility: Recipe types products work in
-- ai_preparation_complexity: How complex to prepare (simple/moderate/complex)
-- ai_preparation_tips: Detailed cooking/prep instructions
-- ai_usage_suggestions: Creative ways to use products
-- ai_meal_category: Best meal timing (breakfast/lunch/dinner/snack)
+**When No Valid Results:**
+- Explain that validation prevented wrong matches
+- Offer search suggestions or alternative terms
+- Ask if user wants to try broader search terms
 
-**Storage & Freshness Intelligence:**
-- ai_storage_requirements: Optimal storage conditions
-- ai_shelf_life_estimate: Expected shelf life in days
-- ai_freshness_indicator: Current freshness status
-- ai_seasonal_availability: Best seasons for products
+**Example Response Pattern:**
+"I found 3 validated products for 'mleko' (my validation system excluded chocolate products like Milka bars that appeared in the search). Here are actual milk products: [list products]"
 
-**Environmental Intelligence:**
-- ai_environmental_score (0-10): Environmental impact rating
-- ai_organic_verified: Organic certification status
+Always prioritize accuracy over quantity - better to return fewer correct results than many irrelevant ones!
 
-🎯 **How to Help Users:**
-
-**For Health Queries:** Use health scores, nutrition grades, sugar/sodium levels, and processing information
-**For Diet Queries:** Leverage diet compatibility and allergen analysis 
-**For Budget Queries:** Use value ratings, deal quality, and smart shopping recommendations
-**For Cooking Queries:** Provide pairing suggestions, recipe compatibility, and preparation tips
-**For Storage Queries:** Share storage requirements, shelf life, and freshness information
-**For Environmental Queries:** Use environmental scores and organic verification
-
-**Always:**
-- Provide specific product recommendations with store names and prices in EUR
-- Include relevant AI insights (health scores, value ratings, etc.)
-- Suggest optimal quantities and storage tips when helpful
-- Mention seasonal availability and freshness when relevant
-- Highlight great deals and explain why they're good value
-- Consider dietary restrictions and allergen safety
-- Provide actionable shopping and cooking advice
-
-You're not just finding prices - you're providing intelligent, comprehensive grocery guidance based on deep product analysis!
-
-Respond in Slovenian when appropriate, and always prioritize user health, value, and satisfaction.
+Respond in Slovenian when appropriate, and always mention when semantic validation helped improve results.
 """
 
 async def execute_enhanced_function(function_name: str, arguments: dict, mcp: SlovenianGroceryMCP, db_source: EnhancedDatabaseSource) -> dict:
-    """Execute enhanced grocery functions with comprehensive AI analysis"""
+    """Execute enhanced grocery functions with semantic validation"""
     try:
-        if function_name == "get_health_focused_recommendations":
+        if function_name == "find_cheapest_product_validated":
+            result = await mcp.find_cheapest_product_with_suggestions(
+                product_name=arguments["product_name"],
+                store_preference=arguments.get("store_preference")
+            )
+            return result
+        
+        elif function_name == "create_validated_shopping_list":
+            result = await mcp.create_budget_shopping_list(
+                budget=arguments["budget"],
+                meal_type=arguments["meal_type"],
+                people_count=arguments.get("people_count", 1),
+                use_semantic_validation=arguments.get("use_validation", True)
+            )
+            return {"shopping_list_result": result}
+        
+        elif function_name == "get_health_focused_recommendations":
             result = await db_source.get_health_focused_products(
                 min_health_score=arguments.get("min_health_score", 7)
             )
@@ -316,50 +243,6 @@ async def execute_enhanced_function(function_name: str, arguments: dict, mcp: Sl
                 min_deal_quality=arguments.get("min_deal_quality", "good")
             )
             return {"smart_deals": result, "count": len(result)}
-        
-        elif function_name == "get_meal_planning_suggestions":
-            result = await db_source.get_meal_planning_suggestions(
-                meal_category=arguments.get("meal_category"),
-                max_prep_complexity=arguments.get("max_prep_complexity", "moderate")
-            )
-            return {"meal_suggestions": result, "count": len(result)}
-        
-        elif function_name == "get_comprehensive_product_analysis":
-            result = await db_source.get_comprehensive_product_analysis(
-                product_name=arguments["product_name"]
-            )
-            return {"product_analysis": result, "product": arguments["product_name"], "count": len(result)}
-        
-        elif function_name == "get_environmental_recommendations":
-            result = await db_source.get_environmental_impact_analysis(
-                min_env_score=arguments.get("min_env_score", 6)
-            )
-            return {"eco_products": result, "count": len(result)}
-        
-        elif function_name == "get_seasonal_recommendations":
-            result = await db_source.get_seasonal_recommendations(
-                season=arguments.get("season")
-            )
-            return {"seasonal_products": result, "count": len(result)}
-        
-        elif function_name == "get_storage_and_usage_tips":
-            result = await db_source.get_storage_and_freshness_tips(
-                product_name=arguments["product_name"]
-            )
-            return {"storage_tips": result, "product": arguments["product_name"], "count": len(result)}
-        
-        elif function_name == "find_cheapest_product":
-            # Use the original MCP function but enhance with AI data
-            result = await mcp.find_cheapest_product(arguments["product_name"])
-            
-            # Also get AI analysis
-            ai_analysis = await db_source.get_comprehensive_product_analysis(arguments["product_name"])
-            
-            return {
-                "products": result, 
-                "ai_analysis": ai_analysis[:3],  # Top 3 AI analyses
-                "product_name": arguments["product_name"]
-            }
         
         else:
             raise ValueError(f"Unknown function: {function_name}")
@@ -386,21 +269,27 @@ class ChatMessage(BaseModel):
     message: str = Field(..., min_length=1, max_length=1000)
     model: str = Field(default="gpt-3.5-turbo")
 
+class ProductSearchRequest(BaseModel):
+    product_name: str = Field(..., min_length=1, max_length=100)
+    use_validation: bool = Field(default=True)
+    store_preference: Optional[str] = None
+
 class APIResponse(BaseModel):
     success: bool
     data: Optional[Any] = None
     message: Optional[str] = None
     error: Optional[str] = None
     timestamp: datetime = Field(default_factory=datetime.now)
+    validation_applied: Optional[bool] = None
 
-# Enhanced Chat endpoint with AI database features
+# Enhanced Chat endpoint
 @app.post("/api/chat", response_model=APIResponse)
 async def enhanced_chat_with_gpt(
     message: ChatMessage,
     mcp: SlovenianGroceryMCP = Depends(get_grocery_mcp),
     db_source: EnhancedDatabaseSource = Depends(get_enhanced_db_source)
 ):
-    """Enhanced chat with GPT using comprehensive AI grocery intelligence"""
+    """Enhanced chat with GPT using semantic validation"""
     try:
         # First GPT call with enhanced system message
         response = client.chat.completions.create(
@@ -444,8 +333,9 @@ async def enhanced_chat_with_gpt(
                     "response": final_message.content,
                     "function_used": function_name,
                     "function_result": function_result,
-                    "ai_enhanced": True
-                }
+                    "semantic_validation": True
+                },
+                validation_applied=True
             )
         
         return APIResponse(
@@ -454,113 +344,139 @@ async def enhanced_chat_with_gpt(
                 "response": message_obj.content,
                 "function_used": None,
                 "function_result": None,
-                "ai_enhanced": True
-            }
+                "semantic_validation": True
+            },
+            validation_applied=True
         )
     
     except Exception as e:
         logger.error(f"Enhanced chat error: {str(e)}")
         return APIResponse(
             success=False,
-            error=str(e)
+            error=str(e),
+            validation_applied=False
         )
 
-# New enhanced endpoints
-@app.get("/api/enhanced/health-products", response_model=APIResponse)
-async def get_health_products(
-    min_health_score: int = Query(default=7, ge=0, le=10),
-    db_source: EnhancedDatabaseSource = Depends(get_enhanced_db_source)
+# Enhanced search endpoint
+@app.post("/api/search", response_model=APIResponse)
+async def enhanced_product_search(
+    request: ProductSearchRequest,
+    mcp: SlovenianGroceryMCP = Depends(get_grocery_mcp)
 ):
-    """Get health-focused products"""
+    """Enhanced product search with semantic validation"""
     try:
-        products = await db_source.get_health_focused_products(min_health_score)
-        return APIResponse(success=True, data={"products": products, "count": len(products)})
+        if request.use_validation:
+            result = await mcp.find_cheapest_product_with_suggestions(
+                product_name=request.product_name,
+                store_preference=request.store_preference
+            )
+            
+            return APIResponse(
+                success=result["success"],
+                data={
+                    "products": result.get("products", []),
+                    "suggestions": result.get("suggestions", []),
+                    "search_term": result.get("search_term"),
+                    "raw_results_count": result.get("raw_results_count", 0)
+                },
+                message=result.get("message"),
+                validation_applied=True
+            )
+        else:
+            # Legacy search without validation
+            products = await mcp.find_cheapest_product(
+                product_name=request.product_name,
+                store_preference=request.store_preference,
+                use_semantic_validation=False
+            )
+            
+            return APIResponse(
+                success=len(products) > 0,
+                data={"products": products},
+                message=f"Found {len(products)} products (no validation applied)",
+                validation_applied=False
+            )
+    
+    except Exception as e:
+        logger.error(f"Enhanced search error: {str(e)}")
+        return APIResponse(
+            success=False,
+            error=str(e),
+            validation_applied=request.use_validation
+        )
+
+# New validation status endpoint
+@app.get("/api/validation/status", response_model=APIResponse)
+async def get_validation_status():
+    """Get semantic validation system status"""
+    try:
+        global semantic_validator
+        
+        status = {
+            "semantic_validation_enabled": semantic_validator is not None,
+            "validation_features": [
+                "Category-based filtering",
+                "Brand exclusion filtering", 
+                "AI semantic validation",
+                "Search suggestions"
+            ],
+            "supported_languages": ["Slovenian", "English"],
+            "category_mappings_count": len(semantic_validator.category_mappings) if semantic_validator else 0
+        }
+        
+        return APIResponse(success=True, data=status)
+    
     except Exception as e:
         return APIResponse(success=False, error=str(e))
 
-@app.get("/api/enhanced/diet/{diet_type}", response_model=APIResponse)
-async def get_diet_products(
-    diet_type: str,
-    db_source: EnhancedDatabaseSource = Depends(get_enhanced_db_source)
-):
-    """Get products for specific diet"""
-    try:
-        products = await db_source.get_diet_compatible_products(diet_type)
-        return APIResponse(success=True, data={"products": products, "diet": diet_type, "count": len(products)})
-    except Exception as e:
-        return APIResponse(success=False, error=str(e))
-
-@app.get("/api/enhanced/smart-deals", response_model=APIResponse)
-async def get_smart_deals(
-    min_quality: str = Query(default="good", regex="^(excellent|good|fair)$"),
-    db_source: EnhancedDatabaseSource = Depends(get_enhanced_db_source)
-):
-    """Get smart shopping deals"""
-    try:
-        deals = await db_source.get_smart_shopping_deals(min_quality)
-        return APIResponse(success=True, data={"deals": deals, "count": len(deals)})
-    except Exception as e:
-        return APIResponse(success=False, error=str(e))
-
-@app.get("/api/enhanced/environmental", response_model=APIResponse)
-async def get_environmental_products(
-    min_env_score: int = Query(default=6, ge=0, le=10),
-    db_source: EnhancedDatabaseSource = Depends(get_enhanced_db_source)
-):
-    """Get environmentally-friendly products"""
-    try:
-        products = await db_source.get_environmental_impact_analysis(min_env_score)
-        return APIResponse(success=True, data={"products": products, "count": len(products)})
-    except Exception as e:
-        return APIResponse(success=False, error=str(e))
-
-@app.get("/api/enhanced/analysis/{product_name}", response_model=APIResponse)
-async def get_product_analysis(
-    product_name: str,
-    db_source: EnhancedDatabaseSource = Depends(get_enhanced_db_source)
-):
-    """Get comprehensive product analysis"""
-    try:
-        analysis = await db_source.get_comprehensive_product_analysis(product_name)
-        return APIResponse(success=True, data={"analysis": analysis, "product": product_name, "count": len(analysis)})
-    except Exception as e:
-        return APIResponse(success=False, error=str(e))
-
+# Enhanced health check
 @app.get("/api/health")
 async def health_check():
     """Enhanced health check endpoint"""
     return {
         "status": "healthy", 
         "timestamp": datetime.now(),
-        "version": "3.0.0",
+        "version": "4.0.0",
         "features": [
-            "AI Health Scoring",
-            "Smart Deal Analysis", 
-            "Diet Compatibility",
-            "Environmental Impact",
-            "Meal Planning Intelligence",
-            "Storage & Freshness Tips"
+            "🔍 Semantic Product Validation",
+            "🎯 Search Intent Recognition", 
+            "💡 Smart Search Suggestions",
+            "🏥 AI Health Scoring",
+            "💰 Smart Deal Analysis", 
+            "🍽️ Diet Compatibility",
+            "🌍 Environmental Impact",
+            "📝 Meal Planning Intelligence"
         ],
         "database_connected": enhanced_db_source is not None,
         "grocery_mcp_connected": grocery_mcp is not None,
-        "ai_enhanced": True
+        "semantic_validation_enabled": semantic_validator is not None,
+        "validation_improvements": [
+            "Prevents wrong product matches (e.g., Milka chocolate when searching for milk)",
+            "Category-aware filtering",
+            "Brand exclusion logic",
+            "AI-powered semantic validation",
+            "Search suggestions when no matches found"
+        ]
     }
 
 @app.get("/")
 async def root():
     """Root endpoint"""
     return {
-        "message": "Enhanced Slovenian Grocery Intelligence API with AI Analysis is running!", 
-        "version": "3.0.0",
+        "message": "Enhanced Slovenian Grocery Intelligence API with Semantic Validation is running!", 
+        "version": "4.0.0",
         "products_count": "34,790+",
-        "ai_features": [
-            "Health & Nutrition Scoring",
-            "Smart Deal Analysis",
-            "Diet Compatibility Checking", 
-            "Environmental Impact Assessment",
-            "Meal Planning Intelligence",
-            "Storage & Freshness Management",
-            "Value & Quality Analysis"
+        "new_features": [
+            "🔍 Semantic Validation - No more wrong product matches!",
+            "💡 Smart Search Suggestions",
+            "🎯 Intent Recognition",
+            "✅ Validation Transparency"
+        ],
+        "example_improvements": [
+            "Searching 'mleko' no longer returns 'MLEČNA REZINA MILKA'",
+            "Better category matching and filtering",
+            "Helpful suggestions when no products found",
+            "Transparent validation reporting"
         ]
     }
 

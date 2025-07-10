@@ -2,10 +2,10 @@
 @import url('https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700&display=swap');
 
 :root {
-  --primary-gradient: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
-  --secondary-gradient: linear-gradient(135deg, #f093fb 0%, #f5576c 100%);
-  --success-gradient: linear-gradient(135deg, #4facfe 0%, #00f2fe 100%);
-  --warning-gradient: linear-gradient(135deg, #fa709a 0%, #fee140 100%);
+  --primary-gradient: linear-gradient(135deg, #2e2e2e 0%, #000000 100%);
+  --secondary-gradient: linear-gradient(135deg, #161116 0%, #ffffff 100%);
+  --success-gradient: linear-gradient(135deg, #362130 0%, #000000 100%);
+  --warning-gradient: linear-gradient(135deg, #66444f 0%, #fee140 100%);
   --glass-bg: rgba(255, 255, 255, 0.25);
   --glass-border: rgba(255, 255, 255, 0.18);
   --text-primary: #2d3748;
@@ -40,7 +40,7 @@ body::before {
   height: 100%;
   background: 
     radial-gradient(circle at 20% 50%, rgba(120, 119, 198, 0.3) 0%, transparent 50%),
-    radial-gradient(circle at 80% 20%, rgba(255, 119, 198, 0.3) 0%, transparent 50%),
+    radial-gradient(circle at 80% 20%, rgba(105, 46, 81, 0.3) 0%, transparent 50%),
     radial-gradient(circle at 40% 80%, rgba(120, 119, 198, 0.3) 0%, transparent 50%);
   z-index: -1;
   animation: float 20s ease-in-out infinite;
@@ -120,24 +120,6 @@ body::before {
     opacity: 1;
     transform: translateY(0);
   }
-}
-
-.app-header h1 {
-  color: var(--text-primary);
-  margin-bottom: 12px;
-  font-size: 3.2em;
-  font-weight: 700;
-  background: linear-gradient(135deg, #667eea, #764ba2, #f093fb);
-  background-size: 300%;
-  -webkit-background-clip: text;
-  -webkit-text-fill-color: transparent;
-  background-clip: text;
-  animation: gradientShift 4s ease infinite;
-}
-
-@keyframes gradientShift {
-  0%, 100% { background-position: 0% 50%; }
-  50% { background-position: 100% 50%; }
 }
 
 .app-header p {
@@ -298,6 +280,7 @@ body::before {
 
 .chat-messages {
   flex: 1;
+  overflow-y: auto;
   padding: 40px;
   max-height: 820px;
   scroll-behavior: smooth;

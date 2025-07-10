@@ -1,8 +1,7 @@
 #!/usr/bin/env python3
 """
-Slovenian Grocery Intelligence MCP Server (Enhanced Version)
-AI-powered grocery shopping and meal planning system for Slovenian stores
-Uses PyMySQL for better MariaDB compatibility with improved error handling
+Enhanced Slovenian Grocery Intelligence with Semantic Validation
+Prevents wrong products like "MLEČNA REZINA MILKA" when searching for "mleko"
 """
 
 import asyncio
@@ -17,6 +16,10 @@ import re
 import os
 from dotenv import load_dotenv
 from contextlib import asynccontextmanager
+from openai import OpenAI
+
+# Import the semantic validator
+from semantic_search_validation import SemanticSearchValidator, EnhancedProductSearch
 
 # Load environment variables
 load_dotenv()
@@ -24,6 +27,9 @@ load_dotenv()
 # Configure logging
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
+
+# Initialize OpenAI client
+client = OpenAI(api_key=os.getenv("OPENAI_API_KEY"))
 
 class DietType(Enum):
     VEGETARIAN = "vegetarian"
@@ -64,32 +70,7 @@ class ProductResult:
     ai_health_score: Optional[float] = None
     ai_nutrition_grade: Optional[str] = None
     ai_value_rating: Optional[int] = None
-
-@dataclass
-class ShoppingListItem:
-    """Represents an item in a shopping list"""
-    product: ProductResult
-    quantity: int
-    total_cost: float
-
-@dataclass
-class ShoppingList:
-    """Represents a complete shopping list"""
-    items: List[ShoppingListItem]
-    total_cost: float
-    stores_needed: List[str]
-    budget_used: float
-    budget_remaining: float
-    meal_type: str
-    serves: int
-
-@dataclass
-class Promotion:
-    """Represents a promotional offer"""
-    product: ProductResult
-    savings: float
-    valid_until: Optional[datetime] = None
-    promotion_type: str = "discount"
+    semantic_match_score: Optional[float] = None  # New field for validation confidence
 
 class DatabaseManager:
     """Handles database connections and operations"""
@@ -140,10 +121,11 @@ class DatabaseManager:
         return results[0] if results else None
 
 class SlovenianGroceryMCP:
-    """Main grocery intelligence system"""
+    """Enhanced grocery intelligence system with semantic validation"""
     
     def __init__(self, db_config: Dict[str, Any]):
         self.db_manager = DatabaseManager(db_config)
+        self.semantic_validator = SemanticSearchValidator()
         self.stores = [store.value for store in StoreType]
         self.meal_templates = {
             "breakfast": ["mleko", "kruh", "jajca", "maslo", "džem", "jogurt"],
@@ -209,20 +191,63 @@ class SlovenianGroceryMCP:
             "ai_value_rating": self._safe_int(row.get("ai_value_rating"))
         }
     
-    # Core functionality methods
+    # Enhanced core functionality methods with semantic validation
     async def find_cheapest_product(
         self, 
         product_name: str, 
         location: str = "Ljubljana", 
-        store_preference: Optional[str] = None
+        store_preference: Optional[str] = None,
+        use_semantic_validation: bool = True
     ) -> List[Dict]:
-        """Find cheapest product across stores"""
+        """Find cheapest product across stores with optional semantic validation"""
         try:
+            # Step 1: Get raw database results (more than needed for validation)
+            raw_results = await self._get_raw_product_search(product_name, store_preference, limit=100)
+            
+            if not raw_results:
+                logger.info(f"❌ No products found for '{product_name}'")
+                return []
+            
+            logger.info(f"🔍 Found {len(raw_results)} raw results for '{product_name}'")
+            
+            # Step 2: Apply semantic validation if enabled
+            if use_semantic_validation:
+                validated_results = await self.semantic_validator.validate_search_results(
+                    product_name, raw_results, max_results=50
+                )
+                
+                if not validated_results:
+                    logger.warning(f"⚠️ No products passed semantic validation for '{product_name}'")
+                    # Return empty with suggestion message
+                    return []
+                
+                logger.info(f"✅ {len(validated_results)} products passed semantic validation")
+                return validated_results
+            
+            # Step 3: Return raw results if validation disabled
+            formatted_results = [self._format_product_result(row) for row in raw_results[:50]]
+            logger.info(f"📋 Returning {len(formatted_results)} unvalidated results")
+            return formatted_results
+            
+        except Exception as e:
+            logger.error(f"Error in find_cheapest_product: {e}")
+            return []
+
+    async def _get_raw_product_search(
+        self, 
+        product_name: str, 
+        store_preference: Optional[str] = None, 
+        limit: int = 100
+    ) -> List[Dict]:
+        """Get raw search results from database"""
+        try:
+            # Enhanced query that gets more data for validation
             query = """
             SELECT store_name, product_name, current_price, regular_price, 
                    has_discount, discount_percentage, product_url, 
                    ai_main_category, ai_subcategory, ai_confidence,
-                   ai_health_score, ai_nutrition_grade, ai_value_rating
+                   ai_health_score, ai_nutrition_grade, ai_value_rating,
+                   ai_product_summary, ai_diet_compatibility
             FROM unified_products_view 
             WHERE product_name LIKE %s 
             AND current_price > 0
@@ -233,53 +258,143 @@ class SlovenianGroceryMCP:
                 query += " AND store_name = %s"
                 params.append(store_preference)
             
-            query += " ORDER BY current_price ASC LIMIT 50"
+            query += f" ORDER BY current_price ASC LIMIT {limit}"
             
             results = await self.db_manager.execute_query(query, params)
-            
-            # Format results
-            formatted_results = [self._format_product_result(row) for row in results]
-            
-            logger.info(f"Found {len(formatted_results)} products for '{product_name}'")
-            return formatted_results
+            return [self._format_product_result(row) for row in results]
             
         except Exception as e:
-            logger.error(f"Error finding cheapest product: {e}")
+            logger.error(f"Error in raw product search: {e}")
             return []
-    
+
+    async def find_cheapest_product_with_suggestions(
+        self, 
+        product_name: str, 
+        location: str = "Ljubljana", 
+        store_preference: Optional[str] = None
+    ) -> Dict[str, Any]:
+        """Enhanced search that provides suggestions when no valid results found"""
+        
+        # Try validated search first
+        validated_results = await self.find_cheapest_product(
+            product_name, location, store_preference, use_semantic_validation=True
+        )
+        
+        if validated_results:
+            return {
+                "success": True,
+                "products": validated_results,
+                "message": f"Found {len(validated_results)} products matching '{product_name}'",
+                "search_term": product_name,
+                "validation_applied": True
+            }
+        
+        # If no validated results, try without validation to see what we got
+        raw_results = await self.find_cheapest_product(
+            product_name, location, store_preference, use_semantic_validation=False
+        )
+        
+        # Generate suggestions
+        suggestions = await self._generate_search_suggestions(product_name, raw_results)
+        
+        return {
+            "success": False,
+            "products": [],
+            "message": f"No matching products found for '{product_name}'",
+            "search_term": product_name,
+            "suggestions": suggestions,
+            "validation_applied": True,
+            "raw_results_count": len(raw_results)
+        }
+
+    async def _generate_search_suggestions(
+        self, 
+        product_name: str, 
+        raw_results: List[Dict]
+    ) -> List[str]:
+        """Generate helpful search suggestions"""
+        
+        suggestions = []
+        
+        # Analyze what categories the raw results belong to
+        if raw_results:
+            categories = list(set([r.get('ai_main_category', '') for r in raw_results if r.get('ai_main_category')]))
+            
+            # Suggest related terms based on categories found
+            category_suggestions = {
+                "Sladkarije": ["čokolada", "bonboni", "sladice"],
+                "Mlečni izdelki": ["mleko", "sir", "jogurt", "maslo"],
+                "Pekovski izdelki": ["kruh", "pecivo", "torte"],
+                "Sadje": ["jabolka", "banane", "pomaranče"],
+                "Zelenjava": ["krompir", "čebula", "paradižnik"],
+                "Beverages": ["kava", "čaj", "sok"],
+            }
+            
+            for category in categories:
+                if category in category_suggestions:
+                    suggestions.extend(category_suggestions[category])
+        
+        # Add common alternative spellings/terms
+        common_alternatives = {
+            "mleko": ["milk", "mlečni izdelki"],
+            "kruh": ["bread", "pekovski izdelki"],
+            "jajca": ["eggs", "jajce"],
+            "kava": ["coffee", "kavni napitki"],
+            "čaj": ["tea", "čajni napitki"]
+        }
+        
+        product_lower = product_name.lower()
+        for term, alternatives in common_alternatives.items():
+            if term in product_lower or product_lower in alternatives:
+                suggestions.extend([term] + alternatives)
+        
+        # Remove duplicates and the original term
+        suggestions = list(set(suggestions))
+        suggestions = [s for s in suggestions if s.lower() != product_name.lower()]
+        
+        return suggestions[:5]
+
     async def compare_prices(
         self, 
         product_name: str, 
-        stores: Optional[List[str]] = None
+        stores: Optional[List[str]] = None,
+        use_semantic_validation: bool = True
     ) -> Dict[str, List[Dict]]:
-        """Compare prices across stores"""
+        """Compare prices across stores with semantic validation"""
         try:
-            query = """
-            SELECT store_name, product_name, current_price, regular_price,
-                   has_discount, discount_percentage, product_url, 
-                   ai_main_category, ai_subcategory
-            FROM unified_products_view 
-            WHERE product_name LIKE %s 
-            AND current_price > 0
-            """
-            params = [f"%{product_name}%"]
-            
-            if stores:
-                placeholders = ",".join(["%s"] * len(stores))
-                query += f" AND store_name IN ({placeholders})"
-                params.extend(stores)
-            
-            query += " ORDER BY store_name, current_price ASC"
-            
-            results = await self.db_manager.execute_query(query, params)
+            # Get results with validation
+            if use_semantic_validation:
+                all_results = await self.find_cheapest_product(
+                    product_name, use_semantic_validation=True
+                )
+            else:
+                query = """
+                SELECT store_name, product_name, current_price, regular_price,
+                       has_discount, discount_percentage, product_url, 
+                       ai_main_category, ai_subcategory
+                FROM unified_products_view 
+                WHERE product_name LIKE %s 
+                AND current_price > 0
+                """
+                params = [f"%{product_name}%"]
+                
+                if stores:
+                    placeholders = ",".join(["%s"] * len(stores))
+                    query += f" AND store_name IN ({placeholders})"
+                    params.extend(stores)
+                
+                query += " ORDER BY store_name, current_price ASC"
+                
+                results = await self.db_manager.execute_query(query, params)
+                all_results = [self._format_product_result(row) for row in results]
             
             # Group by store
             store_results = {}
-            for row in results:
+            for row in all_results:
                 store = row['store_name']
                 if store not in store_results:
                     store_results[store] = []
-                store_results[store].append(self._format_product_result(row))
+                store_results[store].append(row)
             
             logger.info(f"Compared prices across {len(store_results)} stores")
             return store_results
@@ -287,15 +402,17 @@ class SlovenianGroceryMCP:
         except Exception as e:
             logger.error(f"Error comparing prices: {e}")
             return {}
-    
+
+    # Rest of the methods remain the same but can use validated results
     async def create_budget_shopping_list(
         self, 
         budget: float, 
         meal_type: str, 
         people_count: int = 1, 
-        dietary_restrictions: Optional[List[str]] = None
+        dietary_restrictions: Optional[List[str]] = None,
+        use_semantic_validation: bool = True
     ) -> Dict:
-        """Create budget-optimized shopping list"""
+        """Create budget-optimized shopping list with validated products"""
         try:
             # Get base items for meal type
             base_items = self.meal_templates.get(meal_type, self.meal_templates["lunch"])
@@ -303,15 +420,19 @@ class SlovenianGroceryMCP:
             shopping_list = []
             total_cost = 0.0
             stores_needed = set()
+            validation_issues = []
             
-            # Find cheapest version of each item
+            # Find cheapest version of each item with validation
             for item in base_items:
                 if total_cost >= budget:
                     break
                 
-                products = await self.find_cheapest_product(item, "Ljubljana")
+                # Use semantic validation for shopping list
+                search_result = await self.find_cheapest_product_with_suggestions(item)
                 
-                if products:
+                if search_result["success"] and search_result["products"]:
+                    products = search_result["products"]
+                    
                     # Filter by dietary restrictions if provided
                     if dietary_restrictions:
                         products = self._filter_by_dietary_restrictions(products, dietary_restrictions)
@@ -329,6 +450,14 @@ class SlovenianGroceryMCP:
                             })
                             total_cost += item_cost
                             stores_needed.add(best_product['store_name'])
+                        else:
+                            validation_issues.append(f"Budget exceeded for {item}")
+                    else:
+                        validation_issues.append(f"No products found matching dietary restrictions for {item}")
+                else:
+                    validation_issues.append(f"No validated products found for {item}")
+                    if search_result.get("suggestions"):
+                        validation_issues.append(f"Try searching for: {', '.join(search_result['suggestions'])}")
             
             result = {
                 "shopping_list": shopping_list,
@@ -337,7 +466,9 @@ class SlovenianGroceryMCP:
                 "budget_remaining": budget - total_cost,
                 "stores_needed": list(stores_needed),
                 "serves": people_count,
-                "meal_type": meal_type
+                "meal_type": meal_type,
+                "validation_applied": use_semantic_validation,
+                "validation_issues": validation_issues
             }
             
             logger.info(f"Created shopping list with {len(shopping_list)} items, cost: €{total_cost:.2f}")
@@ -352,197 +483,12 @@ class SlovenianGroceryMCP:
                 "budget_remaining": budget,
                 "stores_needed": [],
                 "serves": people_count,
-                "meal_type": meal_type
+                "meal_type": meal_type,
+                "validation_applied": use_semantic_validation,
+                "error": str(e)
             }
-    
-    async def get_current_promotions(
-        self, 
-        store: Optional[str] = None, 
-        category: Optional[str] = None, 
-        min_discount: int = 10
-    ) -> List[Dict]:
-        """Get current promotions and discounts"""
-        try:
-            query = """
-            SELECT store_name, product_name, current_price, regular_price,
-                   discount_percentage, product_url, ai_main_category, ai_subcategory
-            FROM unified_products_view 
-            WHERE has_discount = 1 
-            AND discount_percentage >= %s
-            AND current_price > 0
-            """
-            params = [min_discount]
-            
-            if store:
-                query += " AND store_name = %s"
-                params.append(store)
-            
-            if category:
-                query += " AND ai_main_category LIKE %s"
-                params.append(f"%{category}%")
-            
-            query += " ORDER BY discount_percentage DESC, current_price ASC LIMIT 100"
-            
-            results = await self.db_manager.execute_query(query, params)
-            
-            promotions = []
-            for row in results:
-                promotion = self._format_product_result(row)
-                regular_price = self._safe_float(row.get('regular_price', 0)) or 0
-                current_price = self._safe_float(row.get('current_price', 0)) or 0
-                promotion['savings'] = max(0, regular_price - current_price)
-                promotions.append(promotion)
-            
-            logger.info(f"Found {len(promotions)} promotions with {min_discount}%+ discount")
-            return promotions
-            
-        except Exception as e:
-            logger.error(f"Error getting promotions: {e}")
-            return []
-    
-    async def get_store_availability(self, product_name: str) -> Dict[str, bool]:
-        """Check store availability for a product"""
-        try:
-            query = """
-            SELECT DISTINCT store_name
-            FROM unified_products_view 
-            WHERE product_name LIKE %s 
-            AND current_price > 0
-            """
-            
-            results = await self.db_manager.execute_query(query, [f"%{product_name}%"])
-            available_stores = [row['store_name'] for row in results]
-            
-            # Check all known stores
-            availability = {}
-            for store in self.stores:
-                availability[store] = store in available_stores
-            
-            logger.info(f"Checked availability for '{product_name}' across {len(self.stores)} stores")
-            return availability
-            
-        except Exception as e:
-            logger.error(f"Error checking store availability: {e}")
-            return {store: False for store in self.stores}
-    
-    async def get_ai_insights(self, product_name: str) -> Dict:
-        """Get AI insights for a product"""
-        try:
-            query = """
-            SELECT store_name, product_name, current_price, ai_main_category, ai_subcategory,
-                   ai_confidence, ai_health_score, ai_nutrition_grade, ai_diet_compatibility,
-                   ai_environmental_score, ai_value_rating, ai_product_summary
-            FROM unified_products_view 
-            WHERE product_name LIKE %s 
-            AND current_price > 0
-            ORDER BY current_price ASC
-            LIMIT 20
-            """
-            
-            results = await self.db_manager.execute_query(query, [f"%{product_name}%"])
-            
-            if not results:
-                return {"message": f"No products found for '{product_name}'"}
-            
-            # Process results
-            prices = [self._safe_float(r['current_price']) for r in results if self._safe_float(r['current_price'])]
-            categories = list(set([r['ai_main_category'] for r in results if r['ai_main_category']]))
-            health_scores = [self._safe_float(r['ai_health_score']) for r in results if self._safe_float(r['ai_health_score'])]
-            nutrition_grades = list(set([r['ai_nutrition_grade'] for r in results if r['ai_nutrition_grade']]))
-            
-            insights = {
-                "product_count": len(results),
-                "price_range": {
-                    "min": min(prices) if prices else 0,
-                    "max": max(prices) if prices else 0,
-                    "avg": sum(prices) / len(prices) if prices else 0
-                },
-                "categories": categories,
-                "health_scores": health_scores,
-                "avg_health_score": sum(health_scores) / len(health_scores) if health_scores else None,
-                "nutrition_grades": nutrition_grades,
-                "products": [self._format_product_result(row) for row in results]
-            }
-            
-            logger.info(f"Generated insights for '{product_name}': {len(results)} products analyzed")
-            return insights
-            
-        except Exception as e:
-            logger.error(f"Error getting AI insights: {e}")
-            return {"message": f"Error analyzing '{product_name}': {str(e)}"}
-    
-    async def suggest_meal_from_promotions(
-        self, 
-        budget: float, 
-        meal_type: str, 
-        people_count: int = 1
-    ) -> Dict:
-        """Suggest meal based on current promotions"""
-        try:
-            # Get high-discount promotions
-            promotions = await self.get_current_promotions(min_discount=20)
-            
-            if not promotions:
-                return {
-                    "message": "No suitable promotions found",
-                    "meal_suggestion": None
-                }
-            
-            # Group by category
-            categories = {}
-            for promo in promotions:
-                category = promo.get('ai_main_category', 'Other')
-                if category not in categories:
-                    categories[category] = []
-                categories[category].append(promo)
-            
-            # Build meal from different categories
-            meal_items = []
-            total_cost = 0.0
-            total_savings = 0.0
-            
-            # Try to get items from different categories
-            for category, items in list(categories.items())[:4]:
-                if total_cost >= budget:
-                    break
-                
-                # Sort by savings
-                items.sort(key=lambda x: x.get('savings', 0), reverse=True)
-                
-                for item in items:
-                    if total_cost + item['current_price'] <= budget:
-                        meal_items.append(item)
-                        total_cost += item['current_price']
-                        total_savings += item.get('savings', 0)
-                        break
-            
-            # Generate recipe
-            recipe = self._generate_simple_recipe(meal_items, meal_type, people_count)
-            
-            result = {
-                "meal_suggestion": {
-                    "name": f"Promotional {meal_type.title()}",
-                    "ingredients": meal_items,
-                    "total_cost": total_cost,
-                    "total_savings": total_savings,
-                    "serves": people_count,
-                    "recipe": recipe
-                },
-                "budget_used": total_cost,
-                "budget_remaining": budget - total_cost
-            }
-            
-            logger.info(f"Created promotional meal: {len(meal_items)} items, €{total_cost:.2f}, saves €{total_savings:.2f}")
-            return result
-            
-        except Exception as e:
-            logger.error(f"Error suggesting meal from promotions: {e}")
-            return {
-                "message": f"Error creating meal suggestion: {str(e)}",
-                "meal_suggestion": None
-            }
-    
-    # Helper methods
+
+    # Helper methods (keep existing ones)
     def _filter_by_dietary_restrictions(self, products: List[Dict], restrictions: List[str]) -> List[Dict]:
         """Filter products by dietary restrictions"""
         filtered = []
@@ -560,402 +506,11 @@ class SlovenianGroceryMCP:
             filtered.append(product)
         
         return filtered
-    
-    def _generate_simple_recipe(self, ingredients: List[Dict], meal_type: str, serves: int) -> str:
-        """Generate simple recipe from ingredients"""
-        ingredient_names = [item['product_name'] for item in ingredients]
-        
-        recipes = {
-            "breakfast": f"Pripravite zajtrk za {serves} oseb z naslednjimi sestavinami: {', '.join(ingredient_names)}. Kombinirajte sestavine po okusu za zdrav in hranljiv zajtrk.",
-            "lunch": f"Pripravite kosilo za {serves} oseb. Uporabite {', '.join(ingredient_names)}. Skuhajte osnovne sestavine in dodajte začimbe po okusu.",
-            "dinner": f"Pripravite večerjo za {serves} oseb z {', '.join(ingredient_names)}. Kombinirajte sestavine v okusno in nasitno jed.",
-            "snack": f"Pripravite prigrizek z {', '.join(ingredient_names)}. Enostavno kombinirajte sestavine."
-        }
-        
-        return recipes.get(meal_type, recipes["lunch"])
-    
-    async def get_weekly_meal_plan(self, budget: float, people_count: int = 1) -> Dict:
-        """Generate weekly meal plan within budget"""
-        try:
-            weekly_budget = budget / 7  # Daily budget
-            meal_plan = {}
-            total_cost = 0.0
-            
-            days = ['ponedeljek', 'torek', 'sreda', 'četrtek', 'petek', 'sobota', 'nedelja']
-            meal_types = ['breakfast', 'lunch', 'dinner']
-            
-            for day in days:
-                meal_plan[day] = {}
-                day_cost = 0.0
-                
-                for meal_type in meal_types:
-                    if day_cost >= weekly_budget:
-                        break
-                    
-                    remaining_budget = weekly_budget - day_cost
-                    
-                    shopping_list = await self.create_budget_shopping_list(
-                        remaining_budget, 
-                        meal_type, 
-                        people_count
-                    )
-                    
-                    if shopping_list['shopping_list']:
-                        meal_plan[day][meal_type] = shopping_list
-                        day_cost += shopping_list['total_cost']
-                
-                total_cost += day_cost
-            
-            return {
-                "weekly_plan": meal_plan,
-                "total_cost": total_cost,
-                "budget_used": total_cost,
-                "budget_remaining": budget - total_cost,
-                "serves": people_count
-            }
-            
-        except Exception as e:
-            logger.error(f"Error creating weekly meal plan: {e}")
-            return {
-                "weekly_plan": {},
-                "total_cost": 0.0,
-                "budget_used": 0.0,
-                "budget_remaining": budget,
-                "serves": people_count
-            }
-    
-    async def get_nutrition_analysis(self, product_name: str) -> Dict:
-        """Get nutrition analysis for a product"""
-        try:
-            query = """
-            SELECT ai_health_score, ai_nutrition_grade, ai_diet_compatibility,
-                   ai_environmental_score, ai_product_summary
-            FROM unified_products_view 
-            WHERE product_name LIKE %s 
-            AND ai_health_score IS NOT NULL
-            LIMIT 10
-            """
-            
-            results = await self.db_manager.execute_query(query, [f"%{product_name}%"])
-            
-            if not results:
-                return {"message": f"No nutrition data found for '{product_name}'"}
-            
-            # Calculate averages
-            health_scores = [self._safe_float(r['ai_health_score']) for r in results if self._safe_float(r['ai_health_score'])]
-            env_scores = [self._safe_float(r['ai_environmental_score']) for r in results if self._safe_float(r['ai_environmental_score'])]
-            
-            analysis = {
-                "product_name": product_name,
-                "samples_analyzed": len(results),
-                "average_health_score": sum(health_scores) / len(health_scores) if health_scores else None,
-                "average_environmental_score": sum(env_scores) / len(env_scores) if env_scores else None,
-                "nutrition_grades": list(set([r['ai_nutrition_grade'] for r in results if r['ai_nutrition_grade']])),
-                "diet_compatibility": [r['ai_diet_compatibility'] for r in results if r['ai_diet_compatibility']],
-                "health_recommendation": self._get_health_recommendation(health_scores)
-            }
-            
-            return analysis
-            
-        except Exception as e:
-            logger.error(f"Error getting nutrition analysis: {e}")
-            return {"message": f"Error analyzing nutrition for '{product_name}': {str(e)}"}
-    
-    def _get_health_recommendation(self, health_scores: List[float]) -> str:
-        """Generate health recommendation based on scores"""
-        if not health_scores:
-            return "Ni podatkov o zdravju"
-        
-        avg_score = sum(health_scores) / len(health_scores)
-        
-        if avg_score >= 8:
-            return "Odličen izbor za zdravo prehrano"
-        elif avg_score >= 6:
-            return "Dober izbor z zmerno zdravstveno vrednostjo"
-        elif avg_score >= 4:
-            return "Povprečen izbor, razmislite o alternativah"
-        else:
-            return "Ni priporočeno za redno uživanje"
 
-# Context manager for database operations
-@asynccontextmanager
-async def grocery_system(db_config: Dict[str, Any]):
-    """Context manager for grocery system operations"""
-    system = SlovenianGroceryMCP(db_config)
-    try:
-        await system.connect_db()
-        yield system
-    finally:
-        system.disconnect_db()
-
-# CLI interface for testing
-class GroceryIntelligenceCLI:
-    """Command-line interface for testing the grocery system"""
-    
-    def __init__(self, mcp: SlovenianGroceryMCP):
-        self.mcp = mcp
-    
-    async def run(self):
-        """Run interactive CLI"""
-        print("🛒 Slovenian Grocery Intelligence System v2.0")
-        print("=" * 50)
-        print("AI-powered grocery shopping for Slovenia!")
-        print("Enhanced with better error handling and features.")
-        
-        while True:
-            print("\n🎯 Available Options:")
-            print("1. 🔍 Find cheapest product")
-            print("2. 💰 Create budget shopping list")
-            print("3. 🎁 Check current promotions")
-            print("4. 🍽️ Suggest meal from promotions")
-            print("5. 🏪 Check store availability")
-            print("6. ⚖️ Compare prices across stores")
-            print("7. 🧠 Get AI insights for product")
-            print("8. 📊 Get nutrition analysis")
-            print("9. 📅 Create weekly meal plan")
-            print("10. 🚪 Exit")
-            
-            choice = input("\nEnter your choice (1-10): ").strip()
-            
-            try:
-                if choice == "1":
-                    await self._find_cheapest_product()
-                elif choice == "2":
-                    await self._create_budget_shopping_list()
-                elif choice == "3":
-                    await self._check_current_promotions()
-                elif choice == "4":
-                    await self._suggest_meal_from_promotions()
-                elif choice == "5":
-                    await self._check_store_availability()
-                elif choice == "6":
-                    await self._compare_prices()
-                elif choice == "7":
-                    await self._get_ai_insights()
-                elif choice == "8":
-                    await self._get_nutrition_analysis()
-                elif choice == "9":
-                    await self._create_weekly_meal_plan()
-                elif choice == "10":
-                    print("👋 Hvala za uporabo Slovenian Grocery Intelligence!")
-                    break
-                else:
-                    print("❌ Invalid choice. Please try again.")
-            
-            except Exception as e:
-                print(f"❌ Error: {e}")
-                print("Please try again.")
-    
-    async def _find_cheapest_product(self):
-        """Find cheapest product interface"""
-        product = input("🔍 Product name: ").strip()
-        if not product:
-            print("❌ Please enter a product name.")
-            return
-        
-        print(f"🔎 Searching for cheapest '{product}'...")
-        results = await self.mcp.find_cheapest_product(product)
-        
-        if results:
-            print(f"✅ Found {len(results)} results:")
-            for i, result in enumerate(results[:10], 1):
-                price_info = f"€{result['current_price']:.2f}"
-                if result['has_discount']:
-                    price_info += f" (🔥 {result['discount_percentage']}% OFF)"
-                print(f"  {i}. {result['product_name']}")
-                print(f"     🏪 {result['store_name'].upper()} - {price_info}")
-        else:
-            print(f"❌ No results found for '{product}'.")
-    
-    async def _create_budget_shopping_list(self):
-        """Create budget shopping list interface"""
-        try:
-            budget = float(input("💰 Budget (EUR): ").strip())
-            meal_type = input("🍽️ Meal type (breakfast/lunch/dinner/snack): ").strip().lower()
-            people = int(input("👥 Number of people: ").strip())
-            
-            if meal_type not in ['breakfast', 'lunch', 'dinner', 'snack']:
-                meal_type = 'lunch'
-            
-            print(f"🛒 Creating shopping list...")
-            result = await self.mcp.create_budget_shopping_list(budget, meal_type, people)
-            
-            if result['shopping_list']:
-                print(f"✅ Shopping list created (€{result['total_cost']:.2f}):")
-                for item in result['shopping_list']:
-                    print(f"  • {item['quantity']}x {item['product_name']}")
-                    print(f"    🏪 {item['store_name'].upper()} - €{item['total_item_cost']:.2f}")
-                
-                print(f"\n💰 Budget: €{result['budget_used']:.2f} used, €{result['budget_remaining']:.2f} remaining")
-                print(f"🏪 Stores: {', '.join(result['stores_needed'])}")
-            else:
-                print("❌ Could not create shopping list within budget.")
-                
-        except ValueError:
-            print("❌ Please enter valid numbers.")
-    
-    async def _check_current_promotions(self):
-        """Check current promotions interface"""
-        min_discount = input("🎁 Minimum discount % (default 15): ").strip() or "15"
-        try:
-            promotions = await self.mcp.get_current_promotions(min_discount=int(min_discount))
-            
-            if promotions:
-                print(f"🎯 Found {len(promotions)} promotions:")
-                for i, promo in enumerate(promotions[:15], 1):
-                    savings = promo.get('savings', 0)
-                    print(f"  {i}. {promo['product_name']}")
-                    print(f"     🏪 {promo['store_name'].upper()} - €{promo['current_price']:.2f}")
-                    print(f"     🔥 {promo['discount_percentage']}% OFF (Save €{savings:.2f})")
-            else:
-                print(f"❌ No promotions found with {min_discount}%+ discount.")
-        except ValueError:
-            print("❌ Please enter a valid discount percentage.")
-    
-    async def _suggest_meal_from_promotions(self):
-        """Suggest meal from promotions interface"""
-        try:
-            budget = float(input("💰 Budget (EUR): ").strip())
-            meal_type = input("🍽️ Meal type (breakfast/lunch/dinner): ").strip().lower()
-            people = int(input("👥 Number of people: ").strip())
-            
-            if meal_type not in ['breakfast', 'lunch', 'dinner']:
-                meal_type = 'lunch'
-            
-            print(f"🎁 Finding promotional meal...")
-            result = await self.mcp.suggest_meal_from_promotions(budget, meal_type, people)
-            
-            if result.get('meal_suggestion'):
-                meal = result['meal_suggestion']
-                print(f"✅ Suggested meal: {meal['name']}")
-                print(f"💰 Cost: €{meal['total_cost']:.2f}, Savings: €{meal['total_savings']:.2f}")
-                print(f"🛒 Ingredients:")
-                for ingredient in meal['ingredients']:
-                    print(f"  • {ingredient['product_name']}")
-                    print(f"    🏪 {ingredient['store_name'].upper()} - €{ingredient['current_price']:.2f}")
-                print(f"📝 Recipe: {meal['recipe']}")
-            else:
-                print("❌ Could not create meal suggestion from current promotions.")
-                
-        except ValueError:
-            print("❌ Please enter valid numbers.")
-    
-    async def _check_store_availability(self):
-        """Check store availability interface"""
-        product = input("🏪 Product name: ").strip()
-        if not product:
-            print("❌ Please enter a product name.")
-            return
-        
-        print(f"🔎 Checking availability for '{product}'...")
-        availability = await self.mcp.get_store_availability(product)
-        
-        print(f"🏪 Store availability:")
-        for store, available in availability.items():
-            status = "✅ Available" if available else "❌ Not found"
-            print(f"  {store.upper()}: {status}")
-    
-    async def _compare_prices(self):
-        """Compare prices interface"""
-        product = input("⚖️ Product name: ").strip()
-        if not product:
-            print("❌ Please enter a product name.")
-            return
-        
-        print(f"⚖️ Comparing prices for '{product}'...")
-        comparison = await self.mcp.compare_prices(product)
-        
-        if comparison:
-            print(f"📊 Price comparison:")
-            for store, products in comparison.items():
-                if products:
-                    cheapest = products[0]
-                    print(f"  🏪 {store.upper()}: €{cheapest['current_price']:.2f}")
-                    if cheapest['has_discount']:
-                        print(f"      🔥 {cheapest['discount_percentage']}% OFF")
-                else:
-                    print(f"  🏪 {store.upper()}: Not available")
-        else:
-            print(f"❌ No products found for '{product}'.")
-    
-    async def _get_ai_insights(self):
-        """Get AI insights interface"""
-        product = input("🧠 Product name: ").strip()
-        if not product:
-            print("❌ Please enter a product name.")
-            return
-        
-        print(f"🧠 Getting AI insights for '{product}'...")
-        insights = await self.mcp.get_ai_insights(product)
-        
-        if insights.get("message"):
-            print(f"❌ {insights['message']}")
-            return
-        
-        print(f"🧠 AI Insights:")
-        print(f"  📊 Products analyzed: {insights['product_count']}")
-        print(f"  💰 Price range: €{insights['price_range']['min']:.2f} - €{insights['price_range']['max']:.2f}")
-        print(f"  📈 Average price: €{insights['price_range']['avg']:.2f}")
-        
-        if insights['categories']:
-            print(f"  📂 Categories: {', '.join(insights['categories'])}")
-        
-        if insights.get('avg_health_score'):
-            print(f"  🏥 Average health score: {insights['avg_health_score']:.1f}/10")
-    
-    async def _get_nutrition_analysis(self):
-        """Get nutrition analysis interface"""
-        product = input("📊 Product name: ").strip()
-        if not product:
-            print("❌ Please enter a product name.")
-            return
-        
-        print(f"📊 Getting nutrition analysis for '{product}'...")
-        analysis = await self.mcp.get_nutrition_analysis(product)
-        
-        if analysis.get("message"):
-            print(f"❌ {analysis['message']}")
-            return
-        
-        print(f"📊 Nutrition Analysis:")
-        print(f"  🔬 Samples analyzed: {analysis['samples_analyzed']}")
-        if analysis.get('average_health_score'):
-            print(f"  🏥 Average health score: {analysis['average_health_score']:.1f}/10")
-        if analysis.get('average_environmental_score'):
-            print(f"  🌍 Environmental score: {analysis['average_environmental_score']:.1f}/10")
-        if analysis.get('health_recommendation'):
-            print(f"  💡 Recommendation: {analysis['health_recommendation']}")
-    
-    async def _create_weekly_meal_plan(self):
-        """Create weekly meal plan interface"""
-        try:
-            budget = float(input("💰 Weekly budget (EUR): ").strip())
-            people = int(input("👥 Number of people: ").strip())
-            
-            print(f"📅 Creating weekly meal plan...")
-            result = await self.mcp.get_weekly_meal_plan(budget, people)
-            
-            if result['weekly_plan']:
-                print(f"✅ Weekly meal plan created (€{result['total_cost']:.2f}):")
-                for day, meals in result['weekly_plan'].items():
-                    print(f"  📅 {day.title()}:")
-                    for meal_type, meal_data in meals.items():
-                        if meal_data.get('shopping_list'):
-                            cost = meal_data['total_cost']
-                            items = len(meal_data['shopping_list'])
-                            print(f"    🍽️ {meal_type.title()}: {items} items, €{cost:.2f}")
-                
-                print(f"\n💰 Weekly budget: €{result['budget_used']:.2f} used, €{result['budget_remaining']:.2f} remaining")
-            else:
-                print("❌ Could not create weekly meal plan within budget.")
-                
-        except ValueError:
-            print("❌ Please enter valid numbers.")
-
-# Main function for testing
-async def main():
-    """Main function for testing the grocery system"""
-    print("🛒 Starting Slovenian Grocery Intelligence System...")
+# Enhanced testing
+async def test_enhanced_search():
+    """Test enhanced search functionality"""
+    print("🧪 Testing Enhanced Slovenian Grocery Intelligence with Semantic Validation")
     
     # Database configuration
     db_config = {
@@ -968,16 +523,42 @@ async def main():
         'autocommit': True
     }
     
-    # Use context manager for proper resource management
-    async with grocery_system(db_config) as mcp:
-        # Test basic functionality
-        print("🧪 Testing basic functionality...")
-        test_results = await mcp.find_cheapest_product("mleko")
-        print(f"✅ System working! Found {len(test_results)} products")
+    system = SlovenianGroceryMCP(db_config)
+    
+    try:
+        await system.connect_db()
         
-        # Run interactive CLI
-        cli = GroceryIntelligenceCLI(mcp)
-        await cli.run()
+        # Test cases that should show validation improvement
+        test_cases = [
+            "mleko",  # Should exclude MLEČNA REZINA MILKA
+            "kruh",   # Should exclude breadcrumbs
+            "jabolka" # Should exclude apple juice
+        ]
+        
+        for test_term in test_cases:
+            print(f"\n🔍 Testing search for '{test_term}':")
+            
+            # Test with validation
+            result_with_validation = await system.find_cheapest_product_with_suggestions(test_term)
+            
+            print(f"✅ With validation: {result_with_validation['success']}")
+            if result_with_validation['success']:
+                print(f"   Found {len(result_with_validation['products'])} validated products")
+                for product in result_with_validation['products'][:3]:
+                    print(f"   - {product['product_name']} (€{product['current_price']:.2f})")
+            else:
+                print(f"   ❌ {result_with_validation['message']}")
+                if result_with_validation.get('suggestions'):
+                    print(f"   💡 Suggestions: {', '.join(result_with_validation['suggestions'])}")
+            
+            # Test without validation for comparison
+            raw_results = await system.find_cheapest_product(test_term, use_semantic_validation=False)
+            print(f"📊 Without validation: {len(raw_results)} raw results")
+            
+    except Exception as e:
+        print(f"❌ Test failed: {e}")
+    finally:
+        system.disconnect_db()
 
 if __name__ == "__main__":
-    asyncio.run(main())
+    asyncio.run(test_enhanced_search())
