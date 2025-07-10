@@ -27,6 +27,31 @@ const ChatAssistant = () => {
     "Budget meal for 2 people"
   ];
 
+  // Simple markdown processor for basic formatting
+  const processMarkdown = (text) => {
+    if (!text) return '';
+    
+    // Convert markdown to HTML
+    let html = text
+      // Headers
+      .replace(/^### (.*$)/gim, '<h3>$1</h3>')
+      .replace(/^## (.*$)/gim, '<h2>$1</h2>')
+      .replace(/^# (.*$)/gim, '<h1>$1</h1>')
+      // Bold text
+      .replace(/\*\*(.*?)\*\*/g, '<strong>$1</strong>')
+      // Line breaks
+      .replace(/\n/g, '<br>')
+      // Lists (basic)
+      .replace(/^- (.*$)/gim, '<li>$1</li>')
+      .replace(/^(\d+)\. (.*$)/gim, '<li>$1. $2</li>')
+      // Wrap consecutive <li> elements in <ul>
+      .replace(/(<li>.*<\/li>)/s, '<ul>$1</ul>')
+      // Clean up multiple <br> tags
+      .replace(/(<br>\s*){3,}/g, '<br><br>');
+    
+    return html;
+  };
+
   const sendMessage = async (message = inputValue) => {
     if (!message.trim()) return;
 
@@ -42,7 +67,8 @@ const ChatAssistant = () => {
         const botMessage = { 
           role: 'assistant', 
           content: response.data.response,
-          timestamp: new Date()
+          timestamp: new Date(),
+          isMarkdown: true // Flag to indicate this needs markdown processing
         };
         setMessages(prev => [...prev, botMessage]);
       } else {
@@ -76,6 +102,26 @@ const ChatAssistant = () => {
     return timestamp ? timestamp.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }) : '';
   };
 
+  const renderMessageContent = (msg) => {
+    if (msg.isMarkdown) {
+      // Process markdown and render as HTML
+      const htmlContent = processMarkdown(msg.content);
+      return (
+        <div 
+          className="message-content markdown-content"
+          dangerouslySetInnerHTML={{ __html: htmlContent }}
+        />
+      );
+    } else {
+      // Regular text content
+      return (
+        <div className="message-content">
+          {msg.content}
+        </div>
+      );
+    }
+  };
+
   return (
     <div className="chat-container">
       <div className="chat-messages">
@@ -104,25 +150,23 @@ const ChatAssistant = () => {
         
         {messages.map((msg, index) => (
           <div key={index} className={`message ${msg.role} ${msg.error ? 'error' : ''}`}>
-            <div className="message-avatar">
-              {msg.role === 'user' ? '👤' : '🛒'}
-            </div>
+
             <div className="message-bubble">
-              <div className="message-content">
-                {msg.content}
-              </div>
+              {renderMessageContent(msg)}
               {msg.timestamp && (
                 <div className="message-time">
                   {formatTime(msg.timestamp)}
                 </div>
               )}
             </div>
+            <div className="message-avatar">
+              {msg.role === 'user' ? '👤' : '🛒'}
+            </div>
           </div>
         ))}
         
         {loading && (
           <div className="message assistant">
-            <div className="message-avatar">🛒</div>
             <div className="message-bubble">
               <div className="message-content">
                 <div className="typing-indicator">

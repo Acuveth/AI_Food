@@ -9,6 +9,8 @@
   --text-primary: #ffffff;
   --text-secondary: #cccccc;
   --text-muted: #888888;
+  --accent-color: #4f46e5;
+  --success-color: #10b981;
   --radius: 12px;
   --radius-lg: 16px;
 }
@@ -207,7 +209,7 @@ body {
 
 .message.user {
   justify-content: flex-end;
-  flex-direction: row-reverse;
+
 }
 
 .message-avatar {
@@ -248,6 +250,87 @@ body {
 .message.assistant .message-content {
   background: var(--bg-card);
   color: var(--text-primary);
+}
+
+/* Markdown Content Styling */
+.markdown-content {
+  background: var(--bg-card);
+  color: var(--text-primary);
+}
+
+.markdown-content h1,
+.markdown-content h2,
+.markdown-content h3 {
+  color: var(--text-primary);
+  margin: 16px 0 12px 0;
+  font-weight: 600;
+}
+
+.markdown-content h1 {
+  font-size: 1.4rem;
+  border-bottom: 2px solid var(--border-color);
+  padding-bottom: 8px;
+}
+
+.markdown-content h2 {
+  font-size: 1.2rem;
+  color: var(--accent-color);
+}
+
+.markdown-content h3 {
+  font-size: 1.1rem;
+  color: var(--success-color);
+}
+
+.markdown-content strong {
+  color: var(--text-primary);
+  font-weight: 600;
+}
+
+.markdown-content ul {
+  margin: 12px 0;
+  padding-left: 20px;
+}
+
+.markdown-content li {
+  margin: 8px 0;
+  color: var(--text-secondary);
+  list-style-type: none;
+  position: relative;
+}
+
+.markdown-content li:before {
+  content: "•";
+  color: var(--accent-color);
+  font-weight: bold;
+  position: absolute;
+  left: -15px;
+}
+
+.markdown-content br {
+  line-height: 1.8;
+}
+
+/* Special styling for price information */
+.markdown-content strong:contains("EUR"),
+.markdown-content strong:contains("€") {
+  color: var(--success-color);
+  background: rgba(16, 185, 129, 0.1);
+  padding: 2px 6px;
+  border-radius: 4px;
+}
+
+/* Special styling for store names */
+.markdown-content strong:contains("Trgovina"),
+.markdown-content strong:contains("TUS"),
+.markdown-content strong:contains("Mercator"),
+.markdown-content strong:contains("SPAR"),
+.markdown-content strong:contains("Lidl"),
+.markdown-content strong:contains("DM") {
+  color: var(--accent-color);
+  background: rgba(79, 70, 229, 0.1);
+  padding: 2px 6px;
+  border-radius: 4px;
 }
 
 .message-time {
