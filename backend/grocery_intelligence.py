@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 """
-Enhanced Slovenian Grocery Intelligence with Semantic Validation
-Prevents wrong products like "MLEČNA REZINA MILKA" when searching for "mleko"
+Enhanced Slovenian Grocery Intelligence with Dynamic LLM-Based Validation
+Uses intelligent LLM analysis instead of hard-coded rules
 """
 
 import asyncio
@@ -18,8 +18,8 @@ from dotenv import load_dotenv
 from contextlib import asynccontextmanager
 from openai import OpenAI
 
-# Import the semantic validator
-from semantic_search_validation import SemanticSearchValidator, EnhancedProductSearch
+# Import the dynamic validator
+from semantic_search_validation import DynamicSemanticValidator, EnhancedProductSearchWithDynamicValidation
 
 # Load environment variables
 load_dotenv()
@@ -70,7 +70,7 @@ class ProductResult:
     ai_health_score: Optional[float] = None
     ai_nutrition_grade: Optional[str] = None
     ai_value_rating: Optional[int] = None
-    semantic_match_score: Optional[float] = None  # New field for validation confidence
+    validation_confidence: Optional[float] = None
 
 class DatabaseManager:
     """Handles database connections and operations"""
@@ -120,12 +120,13 @@ class DatabaseManager:
         results = await self.execute_query(query, params)
         return results[0] if results else None
 
-class SlovenianGroceryMCP:
-    """Enhanced grocery intelligence system with semantic validation"""
+class EnhancedSlovenianGroceryMCP:
+    """Enhanced grocery intelligence system with dynamic LLM-based validation"""
     
     def __init__(self, db_config: Dict[str, Any]):
         self.db_manager = DatabaseManager(db_config)
-        self.semantic_validator = SemanticSearchValidator()
+        self.dynamic_validator = DynamicSemanticValidator()
+        self.enhanced_search = None  # Will be initialized after db connection
         self.stores = [store.value for store in StoreType]
         self.meal_templates = {
             "breakfast": ["mleko", "kruh", "jajca", "maslo", "džem", "jogurt"],
@@ -137,6 +138,8 @@ class SlovenianGroceryMCP:
     async def connect_db(self) -> None:
         """Connect to database"""
         await self.db_manager.connect()
+        # Initialize enhanced search after database connection
+        self.enhanced_search = EnhancedProductSearchWithDynamicValidation(self, None)
     
     def disconnect_db(self) -> None:
         """Disconnect from database"""
@@ -188,10 +191,12 @@ class SlovenianGroceryMCP:
             "ai_confidence": row.get("ai_confidence"),
             "ai_health_score": self._safe_float(row.get("ai_health_score")),
             "ai_nutrition_grade": row.get("ai_nutrition_grade"),
-            "ai_value_rating": self._safe_int(row.get("ai_value_rating"))
+            "ai_value_rating": self._safe_int(row.get("ai_value_rating")),
+            "ai_product_summary": row.get("ai_product_summary"),
+            "ai_diet_compatibility": row.get("ai_diet_compatibility")
         }
     
-    # Enhanced core functionality methods with semantic validation
+    # Core functionality methods with dynamic validation
     async def find_cheapest_product(
         self, 
         product_name: str, 
@@ -199,49 +204,67 @@ class SlovenianGroceryMCP:
         store_preference: Optional[str] = None,
         use_semantic_validation: bool = True
     ) -> List[Dict]:
-        """Find cheapest product across stores with optional semantic validation"""
-        try:
-            # Step 1: Get raw database results (more than needed for validation)
-            raw_results = await self._get_raw_product_search(product_name, store_preference, limit=100)
+        """Find cheapest product across stores with dynamic LLM validation"""
+        
+        if use_semantic_validation and self.enhanced_search:
+            # Use the new dynamic validation approach
+            result = await self.enhanced_search.search_products_with_intelligent_validation(
+                product_name, max_results=50, validation_enabled=True
+            )
             
-            if not raw_results:
-                logger.info(f"❌ No products found for '{product_name}'")
+            if result["success"]:
+                logger.info(f"🎯 Dynamic validation success for '{product_name}'")
+                return result["products"]
+            else:
+                logger.info(f"❌ Dynamic validation found no valid products for '{product_name}'")
                 return []
-            
-            logger.info(f"🔍 Found {len(raw_results)} raw results for '{product_name}'")
-            
-            # Step 2: Apply semantic validation if enabled
-            if use_semantic_validation:
-                validated_results = await self.semantic_validator.validate_search_results(
-                    product_name, raw_results, max_results=50
-                )
-                
-                if not validated_results:
-                    logger.warning(f"⚠️ No products passed semantic validation for '{product_name}'")
-                    # Return empty with suggestion message
-                    return []
-                
-                logger.info(f"✅ {len(validated_results)} products passed semantic validation")
-                return validated_results
-            
-            # Step 3: Return raw results if validation disabled
-            formatted_results = [self._format_product_result(row) for row in raw_results[:50]]
-            logger.info(f"📋 Returning {len(formatted_results)} unvalidated results")
-            return formatted_results
-            
-        except Exception as e:
-            logger.error(f"Error in find_cheapest_product: {e}")
-            return []
+        
+        # Fallback to raw database search
+        return await self._get_raw_product_search(product_name, store_preference, limit=50)
+
+    async def find_cheapest_product_with_intelligent_suggestions(
+        self, 
+        product_name: str, 
+        location: str = "Ljubljana", 
+        store_preference: Optional[str] = None
+    ) -> Dict[str, Any]:
+        """Enhanced search with intelligent LLM-based suggestions"""
+        
+        if not self.enhanced_search:
+            return {
+                "success": False,
+                "products": [],
+                "message": "Enhanced search not available",
+                "search_term": product_name,
+                "suggestions": []
+            }
+        
+        # Use dynamic validation
+        result = await self.enhanced_search.search_products_with_intelligent_validation(
+            product_name, max_results=50, validation_enabled=True
+        )
+        
+        # Add additional context for successful results
+        if result["success"]:
+            result["message"] = f"Found {len(result['products'])} products for '{product_name}' using AI validation"
+            if result.get("validation_reasoning"):
+                result["validation_details"] = {
+                    "reasoning": result["validation_reasoning"],
+                    "confidence": result.get("validation_confidence", 0.0),
+                    "invalid_products_filtered": result.get("invalid_products_count", 0)
+                }
+        
+        return result
 
     async def _get_raw_product_search(
         self, 
         product_name: str, 
         store_preference: Optional[str] = None, 
-        limit: int = 100
+        limit: int = 50
     ) -> List[Dict]:
-        """Get raw search results from database"""
+        """Get raw search results from database without validation"""
         try:
-            # Enhanced query that gets more data for validation
+            # Enhanced query that gets comprehensive product data
             query = """
             SELECT store_name, product_name, current_price, regular_price, 
                    has_discount, discount_percentage, product_url, 
@@ -261,98 +284,14 @@ class SlovenianGroceryMCP:
             query += f" ORDER BY current_price ASC LIMIT {limit}"
             
             results = await self.db_manager.execute_query(query, params)
-            return [self._format_product_result(row) for row in results]
+            formatted_results = [self._format_product_result(row) for row in results]
+            
+            logger.info(f"🔍 Raw search found {len(formatted_results)} products for '{product_name}'")
+            return formatted_results
             
         except Exception as e:
             logger.error(f"Error in raw product search: {e}")
             return []
-
-    async def find_cheapest_product_with_suggestions(
-        self, 
-        product_name: str, 
-        location: str = "Ljubljana", 
-        store_preference: Optional[str] = None
-    ) -> Dict[str, Any]:
-        """Enhanced search that provides suggestions when no valid results found"""
-        
-        # Try validated search first
-        validated_results = await self.find_cheapest_product(
-            product_name, location, store_preference, use_semantic_validation=True
-        )
-        
-        if validated_results:
-            return {
-                "success": True,
-                "products": validated_results,
-                "message": f"Found {len(validated_results)} products matching '{product_name}'",
-                "search_term": product_name,
-                "validation_applied": True
-            }
-        
-        # If no validated results, try without validation to see what we got
-        raw_results = await self.find_cheapest_product(
-            product_name, location, store_preference, use_semantic_validation=False
-        )
-        
-        # Generate suggestions
-        suggestions = await self._generate_search_suggestions(product_name, raw_results)
-        
-        return {
-            "success": False,
-            "products": [],
-            "message": f"No matching products found for '{product_name}'",
-            "search_term": product_name,
-            "suggestions": suggestions,
-            "validation_applied": True,
-            "raw_results_count": len(raw_results)
-        }
-
-    async def _generate_search_suggestions(
-        self, 
-        product_name: str, 
-        raw_results: List[Dict]
-    ) -> List[str]:
-        """Generate helpful search suggestions"""
-        
-        suggestions = []
-        
-        # Analyze what categories the raw results belong to
-        if raw_results:
-            categories = list(set([r.get('ai_main_category', '') for r in raw_results if r.get('ai_main_category')]))
-            
-            # Suggest related terms based on categories found
-            category_suggestions = {
-                "Sladkarije": ["čokolada", "bonboni", "sladice"],
-                "Mlečni izdelki": ["mleko", "sir", "jogurt", "maslo"],
-                "Pekovski izdelki": ["kruh", "pecivo", "torte"],
-                "Sadje": ["jabolka", "banane", "pomaranče"],
-                "Zelenjava": ["krompir", "čebula", "paradižnik"],
-                "Beverages": ["kava", "čaj", "sok"],
-            }
-            
-            for category in categories:
-                if category in category_suggestions:
-                    suggestions.extend(category_suggestions[category])
-        
-        # Add common alternative spellings/terms
-        common_alternatives = {
-            "mleko": ["milk", "mlečni izdelki"],
-            "kruh": ["bread", "pekovski izdelki"],
-            "jajca": ["eggs", "jajce"],
-            "kava": ["coffee", "kavni napitki"],
-            "čaj": ["tea", "čajni napitki"]
-        }
-        
-        product_lower = product_name.lower()
-        for term, alternatives in common_alternatives.items():
-            if term in product_lower or product_lower in alternatives:
-                suggestions.extend([term] + alternatives)
-        
-        # Remove duplicates and the original term
-        suggestions = list(set(suggestions))
-        suggestions = [s for s in suggestions if s.lower() != product_name.lower()]
-        
-        return suggestions[:5]
 
     async def compare_prices(
         self, 
@@ -360,33 +299,28 @@ class SlovenianGroceryMCP:
         stores: Optional[List[str]] = None,
         use_semantic_validation: bool = True
     ) -> Dict[str, List[Dict]]:
-        """Compare prices across stores with semantic validation"""
+        """Compare prices across stores with dynamic validation"""
         try:
-            # Get results with validation
-            if use_semantic_validation:
-                all_results = await self.find_cheapest_product(
-                    product_name, use_semantic_validation=True
+            # Get results with dynamic validation
+            if use_semantic_validation and self.enhanced_search:
+                result = await self.enhanced_search.search_products_with_intelligent_validation(
+                    product_name, max_results=100, validation_enabled=True
                 )
+                
+                if result["success"]:
+                    all_results = result["products"]
+                    logger.info(f"📊 Using validated results for price comparison")
+                else:
+                    # Fallback to raw results
+                    all_results = await self._get_raw_product_search(product_name, limit=100)
+                    logger.info(f"📊 Using raw results for price comparison (validation failed)")
             else:
-                query = """
-                SELECT store_name, product_name, current_price, regular_price,
-                       has_discount, discount_percentage, product_url, 
-                       ai_main_category, ai_subcategory
-                FROM unified_products_view 
-                WHERE product_name LIKE %s 
-                AND current_price > 0
-                """
-                params = [f"%{product_name}%"]
-                
-                if stores:
-                    placeholders = ",".join(["%s"] * len(stores))
-                    query += f" AND store_name IN ({placeholders})"
-                    params.extend(stores)
-                
-                query += " ORDER BY store_name, current_price ASC"
-                
-                results = await self.db_manager.execute_query(query, params)
-                all_results = [self._format_product_result(row) for row in results]
+                # Use raw search
+                all_results = await self._get_raw_product_search(product_name, limit=100)
+            
+            # Filter by stores if specified
+            if stores:
+                all_results = [r for r in all_results if r['store_name'] in stores]
             
             # Group by store
             store_results = {}
@@ -396,14 +330,13 @@ class SlovenianGroceryMCP:
                     store_results[store] = []
                 store_results[store].append(row)
             
-            logger.info(f"Compared prices across {len(store_results)} stores")
+            logger.info(f"📊 Price comparison: {len(store_results)} stores, {len(all_results)} products")
             return store_results
             
         except Exception as e:
             logger.error(f"Error comparing prices: {e}")
             return {}
 
-    # Rest of the methods remain the same but can use validated results
     async def create_budget_shopping_list(
         self, 
         budget: float, 
@@ -412,7 +345,7 @@ class SlovenianGroceryMCP:
         dietary_restrictions: Optional[List[str]] = None,
         use_semantic_validation: bool = True
     ) -> Dict:
-        """Create budget-optimized shopping list with validated products"""
+        """Create budget-optimized shopping list with dynamic validation"""
         try:
             # Get base items for meal type
             base_items = self.meal_templates.get(meal_type, self.meal_templates["lunch"])
@@ -422,13 +355,13 @@ class SlovenianGroceryMCP:
             stores_needed = set()
             validation_issues = []
             
-            # Find cheapest version of each item with validation
+            # Find cheapest version of each item with dynamic validation
             for item in base_items:
                 if total_cost >= budget:
                     break
                 
-                # Use semantic validation for shopping list
-                search_result = await self.find_cheapest_product_with_suggestions(item)
+                # Use dynamic validation for shopping list
+                search_result = await self.find_cheapest_product_with_intelligent_suggestions(item)
                 
                 if search_result["success"] and search_result["products"]:
                     products = search_result["products"]
@@ -456,22 +389,31 @@ class SlovenianGroceryMCP:
                         validation_issues.append(f"No products found matching dietary restrictions for {item}")
                 else:
                     validation_issues.append(f"No validated products found for {item}")
+                    # Add suggestions to validation issues
                     if search_result.get("suggestions"):
-                        validation_issues.append(f"Try searching for: {', '.join(search_result['suggestions'])}")
+                        validation_issues.append(f"Suggestions for {item}: {', '.join(search_result['suggestions'])}")
+            
+            # Calculate additional statistics
+            avg_item_cost = total_cost / len(shopping_list) if shopping_list else 0
+            budget_efficiency = (total_cost / budget) * 100 if budget > 0 else 0
             
             result = {
                 "shopping_list": shopping_list,
                 "total_cost": total_cost,
                 "budget_used": total_cost,
                 "budget_remaining": budget - total_cost,
+                "budget_efficiency": budget_efficiency,
+                "average_item_cost": avg_item_cost,
                 "stores_needed": list(stores_needed),
                 "serves": people_count,
                 "meal_type": meal_type,
                 "validation_applied": use_semantic_validation,
-                "validation_issues": validation_issues
+                "validation_issues": validation_issues,
+                "items_found": len(shopping_list),
+                "items_requested": len(base_items)
             }
             
-            logger.info(f"Created shopping list with {len(shopping_list)} items, cost: €{total_cost:.2f}")
+            logger.info(f"🛒 Shopping list created: {len(shopping_list)} items, €{total_cost:.2f} cost")
             return result
             
         except Exception as e:
@@ -490,75 +432,142 @@ class SlovenianGroceryMCP:
 
     # Helper methods (keep existing ones)
     def _filter_by_dietary_restrictions(self, products: List[Dict], restrictions: List[str]) -> List[Dict]:
-        """Filter products by dietary restrictions"""
+        """Filter products by dietary restrictions using LLM understanding"""
         filtered = []
         for product in products:
             category = product.get('ai_main_category', '').lower()
+            product_name = product.get('product_name', '').lower()
+            diet_compatibility = product.get('ai_diet_compatibility', '').lower()
             
-            # Simple filtering logic - can be enhanced
-            if 'vegetarian' in restrictions and 'meso' in product['product_name'].lower():
-                continue
-            if 'vegan' in restrictions and any(x in product['product_name'].lower() for x in ['meso', 'mleko', 'sir', 'jajca']):
-                continue
-            if 'gluten_free' in restrictions and any(x in product['product_name'].lower() for x in ['kruh', 'testenine', 'pšenica']):
-                continue
+            # Use AI diet compatibility if available
+            if diet_compatibility:
+                if any(restriction.lower() in diet_compatibility for restriction in restrictions):
+                    filtered.append(product)
+                    continue
             
-            filtered.append(product)
+            # Fallback to simple filtering logic
+            should_include = True
+            for restriction in restrictions:
+                restriction_lower = restriction.lower()
+                
+                if restriction_lower == 'vegetarian':
+                    if 'meso' in product_name or 'meat' in product_name:
+                        should_include = False
+                        break
+                elif restriction_lower == 'vegan':
+                    if any(x in product_name for x in ['meso', 'mleko', 'sir', 'jajca', 'meat', 'milk', 'cheese', 'egg']):
+                        should_include = False
+                        break
+                elif restriction_lower == 'gluten_free':
+                    if any(x in product_name for x in ['kruh', 'testenine', 'pšenica', 'bread', 'pasta', 'wheat']):
+                        should_include = False
+                        break
+            
+            if should_include:
+                filtered.append(product)
         
         return filtered
 
-# Enhanced testing
-async def test_enhanced_search():
-    """Test enhanced search functionality"""
-    print("🧪 Testing Enhanced Slovenian Grocery Intelligence with Semantic Validation")
-    
-    # Database configuration
-    db_config = {
-        'host': os.getenv('DB_HOST', 'localhost'),
-        'database': os.getenv('DB_DATABASE', 'ai_food'),
-        'user': os.getenv('DB_USER', 'root'),
-        'password': os.getenv('DB_PASSWORD', 'root'),
-        'port': int(os.getenv('DB_PORT', 3306)),
-        'charset': 'utf8mb4',
-        'autocommit': True
-    }
-    
-    system = SlovenianGroceryMCP(db_config)
-    
-    try:
-        await system.connect_db()
-        
-        # Test cases that should show validation improvement
-        test_cases = [
-            "mleko",  # Should exclude MLEČNA REZINA MILKA
-            "kruh",   # Should exclude breadcrumbs
-            "jabolka" # Should exclude apple juice
-        ]
-        
-        for test_term in test_cases:
-            print(f"\n🔍 Testing search for '{test_term}':")
+    async def get_product_insights(self, product_name: str) -> Dict[str, Any]:
+        """Get detailed insights about a product using LLM analysis"""
+        try:
+            # Get product results with validation
+            search_result = await self.find_cheapest_product_with_intelligent_suggestions(product_name)
             
-            # Test with validation
-            result_with_validation = await system.find_cheapest_product_with_suggestions(test_term)
+            if not search_result["success"] or not search_result["products"]:
+                return {
+                    "success": False,
+                    "message": f"No insights available for '{product_name}'",
+                    "suggestions": search_result.get("suggestions", [])
+                }
             
-            print(f"✅ With validation: {result_with_validation['success']}")
-            if result_with_validation['success']:
-                print(f"   Found {len(result_with_validation['products'])} validated products")
-                for product in result_with_validation['products'][:3]:
-                    print(f"   - {product['product_name']} (€{product['current_price']:.2f})")
-            else:
-                print(f"   ❌ {result_with_validation['message']}")
-                if result_with_validation.get('suggestions'):
-                    print(f"   💡 Suggestions: {', '.join(result_with_validation['suggestions'])}")
+            products = search_result["products"][:10]  # Analyze top 10 products
             
-            # Test without validation for comparison
-            raw_results = await system.find_cheapest_product(test_term, use_semantic_validation=False)
-            print(f"📊 Without validation: {len(raw_results)} raw results")
+            # Generate insights using LLM
+            insights_prompt = f"""
+            Analyze these grocery products for "{product_name}":
+
+            {json.dumps([{
+                "name": p.get("product_name", ""),
+                "store": p.get("store_name", ""),
+                "price": p.get("current_price", 0),
+                "category": p.get("ai_main_category", ""),
+                "health_score": p.get("ai_health_score"),
+                "has_discount": p.get("has_discount", False),
+                "discount_percentage": p.get("discount_percentage")
+            } for p in products], indent=2)}
+
+            Provide insights in JSON format:
+            {{
+                "price_analysis": {{
+                    "cheapest_price": 0.0,
+                    "most_expensive_price": 0.0,
+                    "average_price": 0.0,
+                    "best_value_store": "store_name"
+                }},
+                "health_analysis": {{
+                    "average_health_score": 0.0,
+                    "healthiest_option": "product_name",
+                    "health_recommendation": "text"
+                }},
+                "savings_opportunities": [
+                    {{
+                        "store": "store_name",
+                        "product": "product_name",
+                        "savings": 0.0,
+                        "discount_percentage": 0
+                    }}
+                ],
+                "recommendations": [
+                    "recommendation 1",
+                    "recommendation 2"
+                ],
+                "summary": "Brief summary of findings"
+            }}
+            """
             
-    except Exception as e:
-        print(f"❌ Test failed: {e}")
-    finally:
-        system.disconnect_db()
+            response = await asyncio.get_event_loop().run_in_executor(
+                None,
+                lambda: client.chat.completions.create(
+                    model="gpt-4o-mini",
+                    messages=[{"role": "user", "content": insights_prompt}],
+                    temperature=0.1,
+                    max_tokens=1000
+                )
+            )
+            
+            insights_text = response.choices[0].message.content.strip()
+            
+            # Parse insights
+            try:
+                if "```json" in insights_text:
+                    json_text = insights_text.split("```json")[1].split("```")[0].strip()
+                else:
+                    json_text = insights_text
+                    
+                insights = json.loads(json_text)
+                
+                return {
+                    "success": True,
+                    "product_name": product_name,
+                    "insights": insights,
+                    "products_analyzed": len(products),
+                    "validation_applied": search_result.get("validation_applied", False)
+                }
+                
+            except json.JSONDecodeError:
+                return {
+                    "success": False,
+                    "message": "Failed to parse insights",
+                    "raw_response": insights_text
+                }
+                
+        except Exception as e:
+            logger.error(f"Error generating insights: {e}")
+            return {
+                "success": False,
+                "message": f"Failed to generate insights: {str(e)}"
+            }
 
 if __name__ == "__main__":
-    asyncio.run(test_enhanced_search())
+    asyncio.run()

@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 """
-Enhanced FastAPI Backend with Semantic Validation
-Prevents wrong product matches like "MLEČNA REZINA MILKA" for "mleko" searches
+Enhanced FastAPI Backend with Dynamic LLM-Based Validation
+Uses intelligent LLM analysis instead of hard-coded semantic rules
 """
 
 import os
@@ -18,9 +18,9 @@ from openai import OpenAI
 from dotenv import load_dotenv
 
 # Import the enhanced systems
-from grocery_intelligence import SlovenianGroceryMCP
+from grocery_intelligence import EnhancedSlovenianGroceryMCP
 from database_source import EnhancedDatabaseSource, get_database_config
-from semantic_search_validation import SemanticSearchValidator
+from semantic_search_validation import DynamicSemanticValidator
 
 # Load environment variables
 load_dotenv()
@@ -36,38 +36,38 @@ client = OpenAI(api_key=os.getenv("OPENAI_API_KEY"))
 db_config = get_database_config()
 
 # Global instances
-grocery_mcp = None
+enhanced_grocery_mcp = None
 enhanced_db_source = None
-semantic_validator = None
+dynamic_validator = None
 
 @asynccontextmanager
 async def lifespan(app: FastAPI):
     """Application lifespan manager"""
-    global grocery_mcp, enhanced_db_source, semantic_validator
+    global enhanced_grocery_mcp, enhanced_db_source, dynamic_validator
     
     # Startup
-    logger.info("🚀 Starting Enhanced Slovenian Grocery Intelligence API with Semantic Validation...")
+    logger.info("🚀 Starting Enhanced Slovenian Grocery Intelligence API with Dynamic LLM Validation...")
     
-    # Initialize grocery MCP with validation
-    grocery_mcp = SlovenianGroceryMCP(db_config)
-    await grocery_mcp.connect_db()
-    logger.info("✅ Enhanced Grocery MCP connected successfully")
+    # Initialize enhanced grocery MCP with dynamic validation
+    enhanced_grocery_mcp = EnhancedSlovenianGroceryMCP(db_config)
+    await enhanced_grocery_mcp.connect_db()
+    logger.info("✅ Enhanced Grocery MCP with dynamic validation connected successfully")
     
     # Initialize enhanced database source
     enhanced_db_source = EnhancedDatabaseSource(db_config)
     await enhanced_db_source.connect()
     logger.info("✅ Enhanced database source connected successfully")
     
-    # Initialize semantic validator
-    semantic_validator = SemanticSearchValidator()
-    logger.info("✅ Semantic validator initialized")
+    # Initialize dynamic validator
+    dynamic_validator = DynamicSemanticValidator()
+    logger.info("✅ Dynamic LLM validator initialized")
     
     yield
     
     # Shutdown
     logger.info("🔄 Shutting down Enhanced Slovenian Grocery Intelligence API...")
-    if grocery_mcp:
-        grocery_mcp.disconnect_db()
+    if enhanced_grocery_mcp:
+        enhanced_grocery_mcp.disconnect_db()
     if enhanced_db_source:
         enhanced_db_source.disconnect()
     logger.info("✅ Shutdown complete")
@@ -75,8 +75,8 @@ async def lifespan(app: FastAPI):
 # Create FastAPI app
 app = FastAPI(
     title="Enhanced Slovenian Grocery Intelligence API",
-    description="AI-powered grocery shopping assistant with semantic validation to prevent wrong product matches",
-    version="4.0.0",
+    description="AI-powered grocery shopping assistant with dynamic LLM-based validation that intelligently understands product intent",
+    version="5.0.0",
     lifespan=lifespan
 )
 
@@ -94,14 +94,28 @@ ENHANCED_GROCERY_FUNCTIONS = [
     {
         "type": "function",
         "function": {
-            "name": "find_cheapest_product_validated",
-            "description": "Find the cheapest version of a product with semantic validation to ensure correct product matches",
+            "name": "find_products_with_dynamic_validation",
+            "description": "Find products using intelligent LLM-based validation that understands product intent without hard-coded rules",
             "parameters": {
                 "type": "object",
                 "properties": {
                     "product_name": {"type": "string", "description": "Product name to search for"},
-                    "use_validation": {"type": "boolean", "description": "Whether to apply semantic validation", "default": True},
+                    "use_validation": {"type": "boolean", "description": "Whether to apply dynamic LLM validation", "default": True},
                     "store_preference": {"type": "string", "description": "Preferred store (dm, lidl, mercator, spar, tus)"}
+                },
+                "required": ["product_name"]
+            }
+        }
+    },
+    {
+        "type": "function",
+        "function": {
+            "name": "get_product_insights",
+            "description": "Get detailed LLM-generated insights about a product including price analysis, health analysis, and recommendations",
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "product_name": {"type": "string", "description": "Product name to analyze"}
                 },
                 "required": ["product_name"]
             }
@@ -125,7 +139,7 @@ ENHANCED_GROCERY_FUNCTIONS = [
         "type": "function",
         "function": {
             "name": "get_diet_compatible_products",
-            "description": "Find products compatible with specific diets",
+            "description": "Find products compatible with specific diets using LLM understanding",
             "parameters": {
                 "type": "object",
                 "properties": {
@@ -152,72 +166,108 @@ ENHANCED_GROCERY_FUNCTIONS = [
     {
         "type": "function",
         "function": {
-            "name": "create_validated_shopping_list",
-            "description": "Create a budget shopping list with semantic validation to ensure correct products",
+            "name": "create_intelligent_shopping_list",
+            "description": "Create a budget shopping list with dynamic LLM validation to ensure product relevance",
             "parameters": {
                 "type": "object",
                 "properties": {
                     "budget": {"type": "number", "description": "Budget in EUR"},
                     "meal_type": {"type": "string", "enum": ["breakfast", "lunch", "dinner", "snack"], "description": "Type of meal"},
                     "people_count": {"type": "integer", "description": "Number of people", "default": 1},
-                    "use_validation": {"type": "boolean", "description": "Apply semantic validation", "default": True}
+                    "use_validation": {"type": "boolean", "description": "Apply dynamic LLM validation", "default": True}
                 },
                 "required": ["budget", "meal_type"]
+            }
+        }
+    },
+    {
+        "type": "function",
+        "function": {
+            "name": "compare_prices_with_validation",
+            "description": "Compare prices across stores with intelligent product validation",
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "product_name": {"type": "string", "description": "Product name to compare"},
+                    "stores": {"type": "array", "items": {"type": "string"}, "description": "Specific stores to compare (optional)"},
+                    "use_validation": {"type": "boolean", "description": "Apply dynamic validation", "default": True}
+                },
+                "required": ["product_name"]
             }
         }
     }
 ]
 
 # Enhanced system message
-ENHANCED_SYSTEM_MESSAGE = """You are an advanced AI grocery shopping assistant for Slovenia with semantic validation capabilities.
+ENHANCED_SYSTEM_MESSAGE = """You are an advanced AI grocery shopping assistant for Slovenia with cutting-edge dynamic LLM-based validation.
 
-🤖 **Your Enhanced Capabilities:**
-You now have SEMANTIC VALIDATION that prevents wrong product matches. For example:
-- When user searches for "mleko" (milk), you WON'T return "MLEČNA REZINA MILKA" (chocolate bar)
-- When user searches for "kruh" (bread), you WON'T return breadcrumbs or bread-related items that aren't actual bread
-- When user searches for "jabolka" (apples), you WON'T return apple juice or apple-flavored products
+🧠 **Your Revolutionary Capabilities:**
+You now have DYNAMIC LLM-BASED VALIDATION that intelligently understands product intent:
+
+**How Dynamic Validation Works:**
+1. **Database Analysis**: I analyze what products are actually in the database for each search
+2. **Intent Understanding**: I use LLM reasoning to understand what the user really wants
+3. **Intelligent Filtering**: I dynamically determine which products match the user's intent
+4. **No Hard-Coded Rules**: No more rigid category mappings or brand exclusions
+5. **Adaptive Learning**: Each search adapts to the database content and user intent
+
+**Key Improvements:**
+✅ **Contextual Understanding** - Understands "mleko" means actual milk, not chocolate with "milk" in the name
+✅ **Database-Aware** - Analyzes what's actually available before filtering
+✅ **Intelligent Reasoning** - Uses LLM knowledge to make validation decisions
+✅ **Dynamic Suggestions** - Generates smart alternatives when no valid products found
+✅ **Confidence Scoring** - Provides transparency about validation confidence
+
+**Enhanced Features:**
+- 🔍 **Product Insights**: Detailed LLM analysis of price trends, health scores, and recommendations
+- 🎯 **Intent Recognition**: Understands user intent beyond literal search terms
+- 💡 **Smart Suggestions**: Intelligent alternatives based on database content
+- 📊 **Validation Transparency**: Clear explanations of why products were included/excluded
+- 🧠 **Adaptive Logic**: Learns from database content rather than following rigid rules
 
 **Database Access:**
 - 34,790+ products from DM, Mercator, SPAR, TUS, LIDL
 - AI-enhanced with health scores, nutrition grades, value ratings
-- Semantic validation ensures product relevance
-
-**Key Features:**
-✅ **Semantic Product Matching** - Only returns products that actually match user intent
-✅ **Search Suggestions** - Provides alternatives when no valid matches found
-✅ **Validation Transparency** - Explains when validation is applied
-✅ **Category Filtering** - Uses AI categories to improve accuracy
+- Dynamic validation ensures only relevant products
 
 **How to Help Users:**
-1. **Always use validated search** by default for product queries
-2. **Explain validation results** - tell users when validation helped
-3. **Provide suggestions** when no valid products found
-4. **Be transparent** about search quality and matches
-
-**When No Valid Results:**
-- Explain that validation prevented wrong matches
-- Offer search suggestions or alternative terms
-- Ask if user wants to try broader search terms
+1. **Always use dynamic validation** for all product searches
+2. **Explain validation reasoning** when products are filtered
+3. **Provide intelligent suggestions** when no valid matches found
+4. **Show confidence levels** for validation decisions
+5. **Generate insights** using LLM analysis
 
 **Example Response Pattern:**
-"I found 3 validated products for 'mleko' (my validation system excluded chocolate products like Milka bars that appeared in the search). Here are actual milk products: [list products]"
+"I found 5 milk products for 'mleko' using dynamic validation. My AI analysis filtered out 3 chocolate products that contained 'milk' in their names but weren't actual milk. The validation confidence is 95%. Here are the actual milk products: [list products]"
 
-Always prioritize accuracy over quantity - better to return fewer correct results than many irrelevant ones!
+**When No Valid Results:**
+- Explain the validation reasoning
+- Provide database-aware suggestions based on available products
+- Offer to search with broader or alternative terms
+- Show what was found but filtered out and why
 
-Respond in Slovenian when appropriate, and always mention when semantic validation helped improve results.
+Always prioritize intelligent understanding over rigid rules. The goal is to understand what users actually want and find the best matching products in the database.
+
+Respond in Slovenian when appropriate, and always highlight when dynamic validation provided better results than a simple search would have.
 """
 
-async def execute_enhanced_function(function_name: str, arguments: dict, mcp: SlovenianGroceryMCP, db_source: EnhancedDatabaseSource) -> dict:
-    """Execute enhanced grocery functions with semantic validation"""
+async def execute_enhanced_function(function_name: str, arguments: dict, mcp: EnhancedSlovenianGroceryMCP, db_source: EnhancedDatabaseSource) -> dict:
+    """Execute enhanced grocery functions with dynamic LLM validation"""
     try:
-        if function_name == "find_cheapest_product_validated":
-            result = await mcp.find_cheapest_product_with_suggestions(
+        if function_name == "find_products_with_dynamic_validation":
+            result = await mcp.find_cheapest_product_with_intelligent_suggestions(
                 product_name=arguments["product_name"],
                 store_preference=arguments.get("store_preference")
             )
             return result
         
-        elif function_name == "create_validated_shopping_list":
+        elif function_name == "get_product_insights":
+            result = await mcp.get_product_insights(
+                product_name=arguments["product_name"]
+            )
+            return {"insights_result": result}
+        
+        elif function_name == "create_intelligent_shopping_list":
             result = await mcp.create_budget_shopping_list(
                 budget=arguments["budget"],
                 meal_type=arguments["meal_type"],
@@ -225,6 +275,14 @@ async def execute_enhanced_function(function_name: str, arguments: dict, mcp: Sl
                 use_semantic_validation=arguments.get("use_validation", True)
             )
             return {"shopping_list_result": result}
+        
+        elif function_name == "compare_prices_with_validation":
+            result = await mcp.compare_prices(
+                product_name=arguments["product_name"],
+                stores=arguments.get("stores"),
+                use_semantic_validation=arguments.get("use_validation", True)
+            )
+            return {"price_comparison": result}
         
         elif function_name == "get_health_focused_recommendations":
             result = await db_source.get_health_focused_products(
@@ -252,11 +310,11 @@ async def execute_enhanced_function(function_name: str, arguments: dict, mcp: Sl
         raise HTTPException(status_code=500, detail=f"Function execution failed: {str(e)}")
 
 # Dependencies
-async def get_grocery_mcp() -> SlovenianGroceryMCP:
-    """Get grocery MCP instance"""
-    if not grocery_mcp:
-        raise HTTPException(status_code=500, detail="Grocery system not initialized")
-    return grocery_mcp
+async def get_enhanced_grocery_mcp() -> EnhancedSlovenianGroceryMCP:
+    """Get enhanced grocery MCP instance"""
+    if not enhanced_grocery_mcp:
+        raise HTTPException(status_code=500, detail="Enhanced grocery system not initialized")
+    return enhanced_grocery_mcp
 
 async def get_enhanced_db_source() -> EnhancedDatabaseSource:
     """Get enhanced database source instance"""
@@ -267,12 +325,15 @@ async def get_enhanced_db_source() -> EnhancedDatabaseSource:
 # Pydantic models
 class ChatMessage(BaseModel):
     message: str = Field(..., min_length=1, max_length=1000)
-    model: str = Field(default="gpt-3.5-turbo")
+    model: str = Field(default="gpt-4o-mini")
 
 class ProductSearchRequest(BaseModel):
     product_name: str = Field(..., min_length=1, max_length=100)
     use_validation: bool = Field(default=True)
     store_preference: Optional[str] = None
+
+class ProductInsightsRequest(BaseModel):
+    product_name: str = Field(..., min_length=1, max_length=100)
 
 class APIResponse(BaseModel):
     success: bool
@@ -281,15 +342,16 @@ class APIResponse(BaseModel):
     error: Optional[str] = None
     timestamp: datetime = Field(default_factory=datetime.now)
     validation_applied: Optional[bool] = None
+    validation_details: Optional[dict] = None
 
 # Enhanced Chat endpoint
 @app.post("/api/chat", response_model=APIResponse)
 async def enhanced_chat_with_gpt(
     message: ChatMessage,
-    mcp: SlovenianGroceryMCP = Depends(get_grocery_mcp),
+    mcp: EnhancedSlovenianGroceryMCP = Depends(get_enhanced_grocery_mcp),
     db_source: EnhancedDatabaseSource = Depends(get_enhanced_db_source)
 ):
-    """Enhanced chat with GPT using semantic validation"""
+    """Enhanced chat with GPT using dynamic LLM validation"""
     try:
         # First GPT call with enhanced system message
         response = client.chat.completions.create(
@@ -320,22 +382,36 @@ async def enhanced_chat_with_gpt(
                     {"role": "system", "content": ENHANCED_SYSTEM_MESSAGE},
                     {"role": "user", "content": message.message},
                     {"role": "assistant", "content": message_obj.content, "tool_calls": message_obj.tool_calls},
-                    {"role": "tool", "tool_call_id": tool_call.id, "content": json.dumps(function_result)}
+                    {"role": "tool", "tool_call_id": tool_call.id, "content": json.dumps(function_result, ensure_ascii=False)}
                 ],
                 tools=ENHANCED_GROCERY_FUNCTIONS,
                 tool_choice="auto"
             )
             
             final_message = follow_up_response.choices[0].message
+            
+            # Extract validation details if available
+            validation_details = None
+            if isinstance(function_result, dict):
+                if "validation_details" in function_result:
+                    validation_details = function_result["validation_details"]
+                elif "validation_applied" in function_result:
+                    validation_details = {
+                        "validation_applied": function_result.get("validation_applied"),
+                        "confidence": function_result.get("validation_confidence"),
+                        "reasoning": function_result.get("validation_reasoning")
+                    }
+            
             return APIResponse(
                 success=True,
                 data={
                     "response": final_message.content,
                     "function_used": function_name,
                     "function_result": function_result,
-                    "semantic_validation": True
+                    "dynamic_validation": True
                 },
-                validation_applied=True
+                validation_applied=True,
+                validation_details=validation_details
             )
         
         return APIResponse(
@@ -344,9 +420,9 @@ async def enhanced_chat_with_gpt(
                 "response": message_obj.content,
                 "function_used": None,
                 "function_result": None,
-                "semantic_validation": True
+                "dynamic_validation": True
             },
-            validation_applied=True
+            validation_applied=False
         )
     
     except Exception as e:
@@ -361,12 +437,12 @@ async def enhanced_chat_with_gpt(
 @app.post("/api/search", response_model=APIResponse)
 async def enhanced_product_search(
     request: ProductSearchRequest,
-    mcp: SlovenianGroceryMCP = Depends(get_grocery_mcp)
+    mcp: EnhancedSlovenianGroceryMCP = Depends(get_enhanced_grocery_mcp)
 ):
-    """Enhanced product search with semantic validation"""
+    """Enhanced product search with dynamic LLM validation"""
     try:
         if request.use_validation:
-            result = await mcp.find_cheapest_product_with_suggestions(
+            result = await mcp.find_cheapest_product_with_intelligent_suggestions(
                 product_name=request.product_name,
                 store_preference=request.store_preference
             )
@@ -377,10 +453,11 @@ async def enhanced_product_search(
                     "products": result.get("products", []),
                     "suggestions": result.get("suggestions", []),
                     "search_term": result.get("search_term"),
-                    "raw_results_count": result.get("raw_results_count", 0)
+                    "validation_reasoning": result.get("validation_reasoning")
                 },
                 message=result.get("message"),
-                validation_applied=True
+                validation_applied=True,
+                validation_details=result.get("validation_details")
             )
         else:
             # Legacy search without validation
@@ -405,23 +482,58 @@ async def enhanced_product_search(
             validation_applied=request.use_validation
         )
 
-# New validation status endpoint
+# New product insights endpoint
+@app.post("/api/insights", response_model=APIResponse)
+async def get_product_insights(
+    request: ProductInsightsRequest,
+    mcp: EnhancedSlovenianGroceryMCP = Depends(get_enhanced_grocery_mcp)
+):
+    """Get detailed LLM-generated insights about a product"""
+    try:
+        result = await mcp.get_product_insights(request.product_name)
+        
+        return APIResponse(
+            success=result["success"],
+            data=result,
+            message=result.get("message", "Insights generated successfully"),
+            validation_applied=result.get("validation_applied", False)
+        )
+    
+    except Exception as e:
+        logger.error(f"Insights generation error: {str(e)}")
+        return APIResponse(
+            success=False,
+            error=str(e)
+        )
+
+# Enhanced validation status endpoint
 @app.get("/api/validation/status", response_model=APIResponse)
 async def get_validation_status():
-    """Get semantic validation system status"""
+    """Get dynamic validation system status"""
     try:
-        global semantic_validator
+        global dynamic_validator
         
         status = {
-            "semantic_validation_enabled": semantic_validator is not None,
+            "dynamic_validation_enabled": dynamic_validator is not None,
+            "validation_type": "Dynamic LLM-Based Validation",
             "validation_features": [
-                "Category-based filtering",
-                "Brand exclusion filtering", 
-                "AI semantic validation",
-                "Search suggestions"
+                "Database content analysis",
+                "Intent understanding with LLM reasoning", 
+                "Dynamic product filtering",
+                "Intelligent suggestions generation",
+                "Confidence scoring",
+                "Adaptive validation logic"
+            ],
+            "improvements_over_static": [
+                "No hard-coded category mappings",
+                "No rigid brand exclusions",
+                "Database-aware validation",
+                "Context-sensitive filtering",
+                "Intelligent suggestion generation"
             ],
             "supported_languages": ["Slovenian", "English"],
-            "category_mappings_count": len(semantic_validator.category_mappings) if semantic_validator else 0
+            "llm_model": "gpt-4o-mini",
+            "validation_confidence_threshold": "Dynamic (0.0-1.0)"
         }
         
         return APIResponse(success=True, data=status)
@@ -436,26 +548,38 @@ async def health_check():
     return {
         "status": "healthy", 
         "timestamp": datetime.now(),
-        "version": "4.0.0",
+        "version": "5.0.0",
+        "validation_system": "Dynamic LLM-Based Validation",
         "features": [
-            "🔍 Semantic Product Validation",
-            "🎯 Search Intent Recognition", 
-            "💡 Smart Search Suggestions",
+            "🧠 Dynamic LLM Validation",
+            "🔍 Database-Aware Analysis", 
+            "🎯 Intent Understanding",
+            "💡 Intelligent Suggestions",
+            "📊 Product Insights Generation",
             "🏥 AI Health Scoring",
             "💰 Smart Deal Analysis", 
             "🍽️ Diet Compatibility",
             "🌍 Environmental Impact",
-            "📝 Meal Planning Intelligence"
+            "📝 Adaptive Meal Planning"
         ],
         "database_connected": enhanced_db_source is not None,
-        "grocery_mcp_connected": grocery_mcp is not None,
-        "semantic_validation_enabled": semantic_validator is not None,
+        "grocery_mcp_connected": enhanced_grocery_mcp is not None,
+        "dynamic_validation_enabled": dynamic_validator is not None,
         "validation_improvements": [
-            "Prevents wrong product matches (e.g., Milka chocolate when searching for milk)",
-            "Category-aware filtering",
-            "Brand exclusion logic",
-            "AI-powered semantic validation",
-            "Search suggestions when no matches found"
+            "🧠 LLM-powered intent understanding",
+            "📊 Database content analysis before filtering",
+            "🎯 Context-aware product matching",
+            "💡 Intelligent suggestion generation",
+            "🔄 Adaptive validation logic",
+            "📈 Confidence scoring and transparency",
+            "🚀 No hard-coded rules or mappings"
+        ],
+        "example_capabilities": [
+            "Understands 'mleko' should return milk, not chocolate",
+            "Analyzes database content to understand available products",
+            "Generates smart suggestions when no valid products found",
+            "Provides detailed reasoning for validation decisions",
+            "Adapts to different product categories dynamically"
         ]
     }
 
@@ -463,27 +587,37 @@ async def health_check():
 async def root():
     """Root endpoint"""
     return {
-        "message": "Enhanced Slovenian Grocery Intelligence API with Semantic Validation is running!", 
-        "version": "4.0.0",
+        "message": "Enhanced Slovenian Grocery Intelligence API with Dynamic LLM Validation is running!", 
+        "version": "5.0.0",
         "products_count": "34,790+",
-        "new_features": [
-            "🔍 Semantic Validation - No more wrong product matches!",
-            "💡 Smart Search Suggestions",
-            "🎯 Intent Recognition",
-            "✅ Validation Transparency"
+        "validation_system": "Dynamic LLM-Based Validation",
+        "revolutionary_features": [
+            "🧠 Dynamic LLM Validation - No more hard-coded rules!",
+            "📊 Database Content Analysis",
+            "🎯 Intelligent Intent Understanding",
+            "💡 Smart Suggestion Generation",
+            "📈 Confidence Scoring",
+            "🔄 Adaptive Logic"
+        ],
+        "how_it_works": [
+            "1. Analyzes what's actually in the database",
+            "2. Uses LLM to understand user intent",
+            "3. Dynamically filters products based on relevance",
+            "4. Generates intelligent suggestions when needed",
+            "5. Provides transparent reasoning for decisions"
         ],
         "example_improvements": [
-            "Searching 'mleko' no longer returns 'MLEČNA REZINA MILKA'",
-            "Better category matching and filtering",
-            "Helpful suggestions when no products found",
-            "Transparent validation reporting"
+            "Searching 'mleko' intelligently filters milk products from chocolate",
+            "Database-aware suggestions based on available products",
+            "Dynamic understanding without rigid category mappings",
+            "Confident validation with reasoning transparency"
         ]
     }
 
 if __name__ == "__main__":
     import uvicorn
     uvicorn.run(
-        "enhanced_main:app",
+        "updated_main_backend:app",
         host="0.0.0.0",
         port=8000,
         reload=True,

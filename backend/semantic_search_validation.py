@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 """
-Enhanced Search System with Semantic Validation
-Prevents wrong products from being returned by validating semantic meaning
+Dynamic LLM-Based Semantic Search Validation
+Uses the LLM to understand database content and determine product relevance
 """
 
 import asyncio
@@ -22,369 +22,555 @@ logger = logging.getLogger(__name__)
 # Initialize OpenAI client
 client = OpenAI(api_key=os.getenv("OPENAI_API_KEY"))
 
-class SemanticSearchValidator:
-    """Validates search results using AI to ensure semantic correctness"""
+class DynamicSemanticValidator:
+    """
+    Dynamic semantic validator that uses LLM to understand database content
+    and determine product relevance without hard-coded rules
+    """
     
     def __init__(self):
-        self.category_mappings = {
-            # Slovenian search terms -> expected categories
-            "mleko": ["Mlečni izdelki", "Beverages", "Dairy", "Milk"],
-            "kruh": ["Pekovski izdelki", "Bakery", "Bread", "Baked Goods"],
-            "jajca": ["Dairy", "Eggs", "Protein", "Fresh"],
-            "sir": ["Mlečni izdelki", "Dairy", "Cheese"],
-            "meso": ["Meso", "Meat", "Protein", "Fresh"],
-            "riba": ["Seafood", "Fish", "Protein", "Fresh"],
-            "sadje": ["Sadje", "Fruit", "Fresh", "Produce"],
-            "zelenjava": ["Zelenjava", "Vegetables", "Fresh", "Produce"],
-            "testenine": ["Testenine", "Pasta", "Grain Products"],
-            "riž": ["Grain Products", "Rice", "Dry Goods"],
-            "kava": ["Beverages", "Coffee", "Hot Drinks"],
-            "čaj": ["Beverages", "Tea", "Hot Drinks"],
-            "pivo": ["Beverages", "Beer", "Alcohol"],
-            "vino": ["Beverages", "Wine", "Alcohol"],
-            "jogurt": ["Mlečni izdelki", "Dairy", "Yogurt"],
-            "maslo": ["Mlečni izdelki", "Dairy", "Butter", "Fats"],
-            "olje": ["Maščobe", "Oil", "Fats", "Cooking"],
-            "sladkor": ["Sweet Products", "Sugar", "Baking"],
-            "sol": ["Spices", "Salt", "Seasonings"],
-            "krompir": ["Zelenjava", "Vegetables", "Potatoes"],
-            "čebula": ["Zelenjava", "Vegetables", "Onions"],
-            "paradižnik": ["Zelenjava", "Vegetables", "Tomatoes"],
-            "jabolka": ["Sadje", "Fruit", "Apples"],
-            "banane": ["Sadje", "Fruit", "Bananas"],
-            "čokolada": ["Sweet Products", "Chocolate", "Confectionery"],
-        }
+        self.client = client
         
-        self.brand_exclusions = {
-            # When searching for these terms, exclude these brands/words
-            "mleko": ["milka", "milky", "milfina"],  # Exclude chocolate brands
-            "kruh": ["breadcrumbs", "bread crumbs"],  # Exclude breadcrumbs when looking for bread
-        }
-
     async def validate_search_results(
         self, 
         search_term: str, 
-        results: List[Dict], 
+        raw_results: List[Dict], 
         max_results: int = 10
-    ) -> List[Dict]:
+    ) -> Dict[str, Any]:
         """
-        Validate search results to ensure they semantically match the search intent
+        Validate search results using LLM understanding of database content
+        
+        Returns:
+        {
+            "valid_products": List[Dict],
+            "invalid_products": List[Dict],
+            "reasoning": str,
+            "suggestions": List[str],
+            "confidence": float
+        }
         """
-        if not results:
-            return results
         
-        logger.info(f"🔍 Validating {len(results)} results for search term '{search_term}'")
+        if not raw_results:
+            return {
+                "valid_products": [],
+                "invalid_products": [],
+                "reasoning": "No products found in database",
+                "suggestions": [],
+                "confidence": 0.0
+            }
         
-        # Step 1: Quick category-based filtering
-        category_filtered = self._filter_by_category(search_term, results)
-        logger.info(f"📂 Category filtering: {len(category_filtered)} results remain")
+        logger.info(f"🤖 Validating {len(raw_results)} products for search term '{search_term}'")
         
-        # Step 2: Brand/word exclusion filtering
-        brand_filtered = self._filter_by_brand_exclusions(search_term, category_filtered)
-        logger.info(f"🚫 Brand exclusion filtering: {len(brand_filtered)} results remain")
+        # Step 1: Analyze the database content first
+        database_analysis = await self._analyze_database_content(search_term, raw_results)
         
-        # Step 3: AI semantic validation for remaining results
-        if len(brand_filtered) > 0:
-            ai_validated = await self._ai_semantic_validation(search_term, brand_filtered, max_results)
-            logger.info(f"🤖 AI validation: {len(ai_validated)} results remain")
-            return ai_validated
+        # Step 2: Use LLM to determine product relevance
+        validation_result = await self._llm_validate_products(
+            search_term, 
+            raw_results, 
+            database_analysis,
+            max_results
+        )
         
-        return brand_filtered[:max_results]
-
-    def _filter_by_category(self, search_term: str, results: List[Dict]) -> List[Dict]:
-        """Filter results based on expected categories for the search term"""
-        search_term_lower = search_term.lower().strip()
-        expected_categories = self.category_mappings.get(search_term_lower, [])
-        
-        if not expected_categories:
-            # If we don't have category mapping, return all results
-            return results
-        
-        filtered_results = []
-        
-        for result in results:
-            category = result.get('ai_main_category', '').lower()
-            subcategory = result.get('ai_subcategory', '').lower()
-            
-            # Check if the product's category matches expected categories
-            category_match = any(
-                expected.lower() in category or expected.lower() in subcategory
-                for expected in expected_categories
+        # Step 3: Generate suggestions if needed
+        if not validation_result["valid_products"]:
+            suggestions = await self._generate_intelligent_suggestions(
+                search_term, 
+                raw_results, 
+                database_analysis
             )
-            
-            if category_match:
-                filtered_results.append(result)
-            else:
-                logger.debug(f"❌ Category mismatch: '{result.get('product_name')}' "
-                           f"(category: {category}) doesn't match expected categories for '{search_term}'")
+            validation_result["suggestions"] = suggestions
         
-        return filtered_results
-
-    def _filter_by_brand_exclusions(self, search_term: str, results: List[Dict]) -> List[Dict]:
-        """Filter out products that contain excluded brand names or words"""
-        search_term_lower = search_term.lower().strip()
-        exclusions = self.brand_exclusions.get(search_term_lower, [])
-        
-        if not exclusions:
-            return results
-        
-        filtered_results = []
-        
-        for result in results:
-            product_name = result.get('product_name', '').lower()
-            
-            # Check if product name contains any excluded terms
-            contains_exclusion = any(exclusion in product_name for exclusion in exclusions)
-            
-            if not contains_exclusion:
-                filtered_results.append(result)
-            else:
-                logger.debug(f"🚫 Brand exclusion: '{result.get('product_name')}' "
-                           f"contains excluded term for '{search_term}'")
-        
-        return filtered_results
-
-    async def _ai_semantic_validation(
+        return validation_result
+    
+    async def _analyze_database_content(
         self, 
         search_term: str, 
-        results: List[Dict], 
-        max_results: int
-    ) -> List[Dict]:
-        """Use AI to validate if products semantically match the search intent"""
+        raw_results: List[Dict]
+    ) -> Dict[str, Any]:
+        """
+        Analyze what's actually in the database for this search term
+        """
         
-        if not results:
-            return results
+        # Extract product information for analysis
+        product_info = []
+        categories = set()
+        stores = set()
         
-        # Take top candidates for AI validation (don't validate all for performance)
-        candidates = results[:max_results * 2]  # Get more candidates than needed
+        for result in raw_results[:20]:  # Analyze first 20 results
+            product_info.append({
+                "name": result.get("product_name", ""),
+                "category": result.get("ai_main_category", ""),
+                "subcategory": result.get("ai_subcategory", ""),
+                "store": result.get("store_name", ""),
+                "price": result.get("current_price", 0)
+            })
+            
+            if result.get("ai_main_category"):
+                categories.add(result.get("ai_main_category"))
+            if result.get("store_name"):
+                stores.add(result.get("store_name"))
         
-        # Create prompt for AI validation
-        products_text = "\n".join([
-            f"{i+1}. {result['product_name']} (Category: {result.get('ai_main_category', 'Unknown')})"
-            for i, result in enumerate(candidates)
-        ])
+        # Ask LLM to analyze the database content
+        analysis_prompt = f"""
+        You are analyzing a grocery database search. A user searched for "{search_term}" and these are the products found:
+
+        PRODUCTS FOUND:
+        {json.dumps(product_info, indent=2)}
+
+        CATEGORIES FOUND: {', '.join(categories)}
+        STORES: {', '.join(stores)}
+
+        Please analyze:
+        1. What types of products are actually in the database results?
+        2. What was the user most likely looking for when they searched for "{search_term}"?
+        3. Are there clear patterns in the product names or categories?
+        4. Are there any obvious mismatches (e.g., chocolate products when searching for milk)?
+
+        Respond with a JSON object containing:
+        {{
+            "user_intent": "What the user was probably looking for",
+            "database_content_summary": "Summary of what's actually in the database",
+            "potential_issues": ["List of potential mismatches"],
+            "dominant_categories": ["Most common categories found"],
+            "analysis_confidence": 0.0-1.0
+        }}
+        """
         
-        validation_prompt = f"""
-You are a grocery product validator. A user searched for "{search_term}" in Slovenian.
-Here are the product candidates found:
-
-{products_text}
-
-Your task: Identify which products actually match what the user is looking for when they search for "{search_term}".
-
-For example:
-- If searching for "mleko" (milk), exclude chocolate products like "MLEČNA REZINA MILKA" even if they contain similar words
-- If searching for "kruh" (bread), exclude breadcrumbs or bread-related items that aren't actual bread
-- If searching for "jabolka" (apples), exclude apple juice or apple-flavored products unless they're actual apples
-
-Return ONLY a JSON array of numbers representing the products that are valid matches (1-based indexing).
-For example: [1, 3, 5] means products 1, 3, and 5 are valid matches.
-
-If no products are valid matches, return an empty array: []
-
-Response format: Just the JSON array, nothing else.
-"""
-
         try:
-            response = client.chat.completions.create(
-                model="gpt-3.5-turbo",
-                messages=[
-                    {"role": "user", "content": validation_prompt}
-                ],
-                temperature=0.1,  # Low temperature for consistent results
-                max_tokens=100
+            response = await asyncio.get_event_loop().run_in_executor(
+                None,
+                lambda: self.client.chat.completions.create(
+                    model="gpt-4o-mini",
+                    messages=[{"role": "user", "content": analysis_prompt}],
+                    temperature=0.1,
+                    max_tokens=500
+                )
             )
             
-            # Parse AI response
-            ai_response = response.choices[0].message.content.strip()
-            logger.info(f"🤖 AI validation response: {ai_response}")
+            analysis_text = response.choices[0].message.content.strip()
             
-            # Extract valid indices
-            valid_indices = json.loads(ai_response)
-            
-            # Return only the valid products
-            validated_results = []
-            for index in valid_indices:
-                if 1 <= index <= len(candidates):
-                    validated_results.append(candidates[index - 1])
-            
-            # Limit to max_results
-            return validated_results[:max_results]
-            
+            # Extract JSON from response
+            try:
+                if "```json" in analysis_text:
+                    json_text = analysis_text.split("```json")[1].split("```")[0].strip()
+                else:
+                    json_text = analysis_text
+                    
+                analysis = json.loads(json_text)
+                logger.info(f"🧠 Database analysis: {analysis.get('user_intent', 'Unknown intent')}")
+                return analysis
+                
+            except json.JSONDecodeError:
+                logger.warning("Failed to parse analysis JSON, using fallback")
+                return {
+                    "user_intent": f"Products related to '{search_term}'",
+                    "database_content_summary": f"Found {len(product_info)} products",
+                    "potential_issues": [],
+                    "dominant_categories": list(categories),
+                    "analysis_confidence": 0.5
+                }
+                
         except Exception as e:
-            logger.error(f"❌ AI validation failed: {e}")
-            # Fallback: return first few results if AI validation fails
-            return results[:max_results]
+            logger.error(f"Database analysis failed: {e}")
+            return {
+                "user_intent": f"Products related to '{search_term}'",
+                "database_content_summary": f"Found {len(product_info)} products",
+                "potential_issues": [],
+                "dominant_categories": list(categories),
+                "analysis_confidence": 0.3
+            }
+    
+    async def _llm_validate_products(
+        self,
+        search_term: str,
+        raw_results: List[Dict],
+        database_analysis: Dict[str, Any],
+        max_results: int
+    ) -> Dict[str, Any]:
+        """
+        Use LLM to validate which products actually match the user's search intent
+        """
+        
+        # Prepare products for validation (limit to prevent token overflow)
+        validation_products = []
+        for i, result in enumerate(raw_results[:30]):  # Validate up to 30 products
+            validation_products.append({
+                "index": i,
+                "name": result.get("product_name", ""),
+                "category": result.get("ai_main_category", ""),
+                "subcategory": result.get("ai_subcategory", ""),
+                "store": result.get("store_name", ""),
+                "price": result.get("current_price", 0),
+                "summary": result.get("ai_product_summary", "")
+            })
+        
+        validation_prompt = f"""
+        You are a grocery shopping assistant with expertise in product categorization.
 
-# Enhanced Search Functions for the main system
+        USER SEARCH: "{search_term}"
+        USER INTENT: {database_analysis.get('user_intent', 'Unknown')}
+        
+        DATABASE ANALYSIS:
+        - Content Summary: {database_analysis.get('database_content_summary', '')}
+        - Potential Issues: {database_analysis.get('potential_issues', [])}
+        - Dominant Categories: {database_analysis.get('dominant_categories', [])}
 
-class EnhancedProductSearch:
-    """Enhanced product search with semantic validation"""
+        PRODUCTS TO VALIDATE:
+        {json.dumps(validation_products, indent=2)}
+
+        Your task: Determine which products actually match what the user is looking for.
+
+        Consider:
+        1. Does the product name match the user's intent?
+        2. Is the category appropriate for what they're searching for?
+        3. Are there obvious mismatches (e.g., chocolate when searching for milk)?
+        4. Would a typical shopper expect this product when searching for "{search_term}"?
+
+        Respond with JSON:
+        {{
+            "valid_indices": [0, 2, 5],  // Array of indices for valid products
+            "invalid_indices": [1, 3, 4],  // Array of indices for invalid products
+            "reasoning": "Explanation of validation decisions",
+            "confidence": 0.0-1.0,
+            "validation_summary": "Brief summary of what was accepted/rejected"
+        }}
+
+        Be reasonable - don't be too strict, but filter out obvious mismatches.
+        """
+        
+        try:
+            response = await asyncio.get_event_loop().run_in_executor(
+                None,
+                lambda: self.client.chat.completions.create(
+                    model="gpt-4o-mini",
+                    messages=[{"role": "user", "content": validation_prompt}],
+                    temperature=0.1,
+                    max_tokens=1000
+                )
+            )
+            
+            validation_text = response.choices[0].message.content.strip()
+            
+            # Extract JSON from response
+            try:
+                if "```json" in validation_text:
+                    json_text = validation_text.split("```json")[1].split("```")[0].strip()
+                else:
+                    json_text = validation_text
+                    
+                validation_result = json.loads(json_text)
+                
+                # Build final results
+                valid_products = []
+                invalid_products = []
+                
+                for idx in validation_result.get("valid_indices", []):
+                    if 0 <= idx < len(raw_results):
+                        valid_products.append(raw_results[idx])
+                
+                for idx in validation_result.get("invalid_indices", []):
+                    if 0 <= idx < len(raw_results):
+                        invalid_products.append(raw_results[idx])
+                
+                # Limit to max_results
+                valid_products = valid_products[:max_results]
+                
+                logger.info(f"✅ Validation: {len(valid_products)} valid, {len(invalid_products)} invalid")
+                logger.info(f"🧠 Reasoning: {validation_result.get('reasoning', 'No reasoning provided')}")
+                
+                return {
+                    "valid_products": valid_products,
+                    "invalid_products": invalid_products,
+                    "reasoning": validation_result.get("reasoning", ""),
+                    "confidence": validation_result.get("confidence", 0.5),
+                    "validation_summary": validation_result.get("validation_summary", ""),
+                    "suggestions": []
+                }
+                
+            except json.JSONDecodeError:
+                logger.warning("Failed to parse validation JSON, using fallback")
+                # Fallback: return first max_results products
+                return {
+                    "valid_products": raw_results[:max_results],
+                    "invalid_products": [],
+                    "reasoning": "Validation parsing failed, returned all products",
+                    "confidence": 0.3,
+                    "validation_summary": "Fallback validation",
+                    "suggestions": []
+                }
+                
+        except Exception as e:
+            logger.error(f"LLM validation failed: {e}")
+            # Fallback: return first max_results products
+            return {
+                "valid_products": raw_results[:max_results],
+                "invalid_products": [],
+                "reasoning": f"Validation failed: {str(e)}",
+                "confidence": 0.2,
+                "validation_summary": "Error fallback",
+                "suggestions": []
+            }
+    
+    async def _generate_intelligent_suggestions(
+        self,
+        search_term: str,
+        raw_results: List[Dict],
+        database_analysis: Dict[str, Any]
+    ) -> List[str]:
+        """
+        Generate intelligent search suggestions based on database content
+        """
+        
+        # Extract categories and product patterns from database
+        categories = set()
+        product_patterns = []
+        
+        for result in raw_results[:10]:
+            if result.get("ai_main_category"):
+                categories.add(result.get("ai_main_category"))
+            
+            # Extract key words from product names
+            product_name = result.get("product_name", "").lower()
+            words = product_name.split()
+            for word in words:
+                if len(word) > 3:  # Only meaningful words
+                    product_patterns.append(word)
+        
+        suggestion_prompt = f"""
+        A user searched for "{search_term}" but no valid products were found.
+
+        DATABASE ANALYSIS:
+        - User Intent: {database_analysis.get('user_intent', 'Unknown')}
+        - Found Categories: {', '.join(categories)}
+        - Potential Issues: {database_analysis.get('potential_issues', [])}
+
+        SAMPLE PRODUCT WORDS FROM DATABASE: {', '.join(list(set(product_patterns))[:20])}
+
+        Generate 3-5 alternative search terms that might help the user find what they're looking for.
+        Consider:
+        1. Different ways to express the same product in Slovenian
+        2. More general or specific terms
+        3. Alternative product names or brands
+        4. Related products
+
+        Respond with JSON:
+        {{
+            "suggestions": ["term1", "term2", "term3"],
+            "reasoning": "Why these suggestions might work better"
+        }}
+        """
+        
+        try:
+            response = await asyncio.get_event_loop().run_in_executor(
+                None,
+                lambda: self.client.chat.completions.create(
+                    model="gpt-4o-mini",
+                    messages=[{"role": "user", "content": suggestion_prompt}],
+                    temperature=0.3,
+                    max_tokens=300
+                )
+            )
+            
+            suggestion_text = response.choices[0].message.content.strip()
+            
+            # Extract JSON from response
+            try:
+                if "```json" in suggestion_text:
+                    json_text = suggestion_text.split("```json")[1].split("```")[0].strip()
+                else:
+                    json_text = suggestion_text
+                    
+                suggestion_result = json.loads(json_text)
+                suggestions = suggestion_result.get("suggestions", [])
+                
+                logger.info(f"💡 Generated {len(suggestions)} suggestions for '{search_term}'")
+                return suggestions[:5]  # Limit to 5 suggestions
+                
+            except json.JSONDecodeError:
+                logger.warning("Failed to parse suggestions JSON")
+                return []
+                
+        except Exception as e:
+            logger.error(f"Suggestion generation failed: {e}")
+            return []
+
+# Enhanced integration for the existing system
+class EnhancedProductSearchWithDynamicValidation:
+    """
+    Enhanced product search with dynamic LLM-based validation
+    """
     
     def __init__(self, grocery_mcp, db_source):
         self.grocery_mcp = grocery_mcp
         self.db_source = db_source
-        self.validator = SemanticSearchValidator()
+        self.validator = DynamicSemanticValidator()
 
-    async def find_cheapest_product_validated(
+    async def search_products_with_intelligent_validation(
         self, 
-        product_name: str, 
-        location: str = "Ljubljana", 
-        store_preference: Optional[str] = None,
-        max_results: int = 10
-    ) -> List[Dict]:
-        """Find cheapest product with semantic validation"""
-        
-        # Step 1: Get initial search results (more than we need)
-        initial_results = await self.grocery_mcp.find_cheapest_product(
-            product_name, location, store_preference
-        )
-        
-        if not initial_results:
-            logger.info(f"❌ No initial results found for '{product_name}'")
-            return []
-        
-        # Step 2: Apply semantic validation
-        validated_results = await self.validator.validate_search_results(
-            product_name, initial_results, max_results
-        )
-        
-        if not validated_results:
-            logger.warning(f"⚠️ No products passed semantic validation for '{product_name}'")
-            # Optionally return a message about expanding search or trying different terms
-            return []
-        
-        logger.info(f"✅ Returning {len(validated_results)} validated results for '{product_name}'")
-        return validated_results
-
-    async def search_with_suggestions(
-        self, 
-        product_name: str, 
-        max_results: int = 10
+        search_term: str, 
+        max_results: int = 10,
+        validation_enabled: bool = True
     ) -> Dict[str, Any]:
         """
-        Enhanced search that provides suggestions if no valid results found
+        Search products with intelligent LLM-based validation
         """
-        validated_results = await self.find_cheapest_product_validated(
-            product_name, max_results=max_results
-        )
         
-        if validated_results:
+        # Step 1: Get raw database results
+        raw_results = await self._get_raw_database_results(search_term, limit=50)
+        
+        if not raw_results:
             return {
-                "success": True,
-                "results": validated_results,
-                "message": f"Found {len(validated_results)} products matching '{product_name}'"
+                "success": False,
+                "products": [],
+                "message": f"No products found for '{search_term}'",
+                "search_term": search_term,
+                "validation_applied": False,
+                "suggestions": []
             }
         
-        # If no validated results, try to provide helpful suggestions
-        suggestions = await self._generate_search_suggestions(product_name)
+        logger.info(f"🔍 Found {len(raw_results)} raw results for '{search_term}'")
         
+        # Step 2: Apply dynamic validation if enabled
+        if validation_enabled:
+            validation_result = await self.validator.validate_search_results(
+                search_term, raw_results, max_results
+            )
+            
+            if validation_result["valid_products"]:
+                return {
+                    "success": True,
+                    "products": validation_result["valid_products"],
+                    "message": f"Found {len(validation_result['valid_products'])} validated products for '{search_term}'",
+                    "search_term": search_term,
+                    "validation_applied": True,
+                    "validation_reasoning": validation_result["reasoning"],
+                    "validation_confidence": validation_result["confidence"],
+                    "invalid_products_count": len(validation_result["invalid_products"]),
+                    "suggestions": []
+                }
+            else:
+                # No valid products found
+                return {
+                    "success": False,
+                    "products": [],
+                    "message": f"No valid products found for '{search_term}' after validation",
+                    "search_term": search_term,
+                    "validation_applied": True,
+                    "validation_reasoning": validation_result["reasoning"],
+                    "validation_confidence": validation_result["confidence"],
+                    "suggestions": validation_result["suggestions"],
+                    "raw_results_count": len(raw_results)
+                }
+        
+        # Step 3: Return raw results if validation disabled
+        formatted_results = raw_results[:max_results]
         return {
-            "success": False,
-            "results": [],
-            "message": f"No products found for '{product_name}'",
-            "suggestions": suggestions
+            "success": True,
+            "products": formatted_results,
+            "message": f"Found {len(formatted_results)} products for '{search_term}' (no validation)",
+            "search_term": search_term,
+            "validation_applied": False,
+            "suggestions": []
         }
 
-    async def _generate_search_suggestions(self, product_name: str) -> List[str]:
-        """Generate search suggestions when no results found"""
-        
-        # Common alternative terms in Slovenian
-        suggestions_map = {
-            "milk": ["mleko", "mlečni izdelki"],
-            "bread": ["kruh", "pekovski izdelki"],
-            "eggs": ["jajca"],
-            "cheese": ["sir", "mlečni izdelki"],
-            "meat": ["meso"],
-            "fish": ["riba"],
-            "apple": ["jabolka", "sadje"],
-            "coffee": ["kava"],
-            "tea": ["čaj"],
-            "pasta": ["testenine"],
-            "rice": ["riž"]
-        }
-        
-        # Try to find suggestions based on the search term
-        product_lower = product_name.lower()
-        suggestions = []
-        
-        for english_term, slovenian_terms in suggestions_map.items():
-            if english_term in product_lower or any(term in product_lower for term in slovenian_terms):
-                suggestions.extend(slovenian_terms)
-        
-        # Remove duplicates and the original search term
-        suggestions = list(set(suggestions))
-        if product_name.lower() in [s.lower() for s in suggestions]:
-            suggestions = [s for s in suggestions if s.lower() != product_name.lower()]
-        
-        return suggestions[:5]  # Return top 5 suggestions
+    async def _get_raw_database_results(
+        self, 
+        search_term: str, 
+        limit: int = 50
+    ) -> List[Dict]:
+        """
+        Get raw search results from database
+        """
+        try:
+            # Use the existing grocery MCP search
+            results = await self.grocery_mcp.find_cheapest_product(
+                search_term, use_semantic_validation=False
+            )
+            return results[:limit]
+        except Exception as e:
+            logger.error(f"Database search failed: {e}")
+            return []
 
-# Integration functions for the existing system
-
-async def enhanced_find_cheapest_product(
-    product_name: str,
+# Integration function for existing system
+async def enhanced_search_with_dynamic_validation(
+    search_term: str,
     grocery_mcp,
     db_source,
-    **kwargs
+    max_results: int = 10,
+    validation_enabled: bool = True
 ) -> Dict[str, Any]:
     """
-    Enhanced find_cheapest_product function that can be used in the existing system
+    Enhanced search function that can be used in the existing system
     """
-    search_engine = EnhancedProductSearch(grocery_mcp, db_source)
+    search_engine = EnhancedProductSearchWithDynamicValidation(grocery_mcp, db_source)
     
-    # Use the validated search
-    result = await search_engine.search_with_suggestions(product_name)
+    result = await search_engine.search_products_with_intelligent_validation(
+        search_term, max_results, validation_enabled
+    )
     
-    if result["success"]:
-        return {
-            "products": result["results"],
-            "message": result["message"],
-            "validation_applied": True
-        }
-    else:
-        return {
-            "products": [],
-            "message": result["message"],
-            "suggestions": result.get("suggestions", []),
-            "validation_applied": True
-        }
+    return result
 
-# Example usage and testing
-async def test_semantic_validation():
-    """Test the semantic validation system"""
+# Testing function
+async def test_dynamic_validation():
+    """
+    Test the dynamic validation system
+    """
     
-    # Mock results for testing
-    mock_results = [
+    # Mock data for testing
+    mock_results_mleko = [
         {
             "product_name": "MLEKO UHT 3,5% MAŠČOBE 1L",
             "store_name": "mercator",
             "current_price": 1.19,
-            "ai_main_category": "Mlečni izdelki"
+            "ai_main_category": "Mlečni izdelki",
+            "ai_subcategory": "Mleko",
+            "ai_product_summary": "UHT milk with 3.5% fat content"
         },
         {
-            "product_name": "MLEČNA REZINA MILKA 29 G",
+            "product_name": "MLEČNA REZINA MILKA 28G",
             "store_name": "spar", 
             "current_price": 0.58,
-            "ai_main_category": "Sladkarije"
+            "ai_main_category": "Sladkarije",
+            "ai_subcategory": "Čokolada",
+            "ai_product_summary": "Chocolate bar with milk filling"
         },
         {
             "product_name": "POLNOMASTNO MLEKO 1L",
             "store_name": "lidl",
             "current_price": 0.89,
-            "ai_main_category": "Mlečni izdelki"
+            "ai_main_category": "Mlečni izdelki",
+            "ai_subcategory": "Mleko",
+            "ai_product_summary": "Full-fat fresh milk"
+        },
+        {
+            "product_name": "MILKA ČOKOLADA OREO 100G",
+            "store_name": "dm",
+            "current_price": 1.49,
+            "ai_main_category": "Sladkarije",
+            "ai_subcategory": "Čokolada",
+            "ai_product_summary": "Chocolate bar with Oreo cookies"
         }
     ]
     
-    validator = SemanticSearchValidator()
+    validator = DynamicSemanticValidator()
     
-    print("🧪 Testing semantic validation for 'mleko':")
-    validated = await validator.validate_search_results("mleko", mock_results)
+    print("🧪 Testing Dynamic Validation for 'mleko':")
+    result = await validator.validate_search_results("mleko", mock_results_mleko)
     
-    print(f"📊 Original results: {len(mock_results)}")
-    print(f"✅ Validated results: {len(validated)}")
+    print(f"✅ Valid products: {len(result['valid_products'])}")
+    for product in result['valid_products']:
+        print(f"   - {product['product_name']} ({product['ai_main_category']})")
     
-    for result in validated:
-        print(f"   - {result['product_name']} ({result['ai_main_category']})")
+    print(f"❌ Invalid products: {len(result['invalid_products'])}")
+    for product in result['invalid_products']:
+        print(f"   - {product['product_name']} ({product['ai_main_category']})")
+    
+    print(f"🧠 Reasoning: {result['reasoning']}")
+    print(f"📊 Confidence: {result['confidence']:.2f}")
+    
+    if result['suggestions']:
+        print(f"💡 Suggestions: {', '.join(result['suggestions'])}")
 
 if __name__ == "__main__":
-    asyncio.run(test_semantic_validation())
+    asyncio.run(test_dynamic_validation())

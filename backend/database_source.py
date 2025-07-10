@@ -396,49 +396,6 @@ def get_database_config() -> Dict[str, Any]:
         'autocommit': True
     }
 
-# Test the enhanced database features
-async def test_enhanced_features():
-    """Test enhanced database features"""
-    print("🤖 Testing enhanced AI database features...")
-    
-    db_config = get_database_config()
-    db_source = EnhancedDatabaseSource(db_config)
-    
-    try:
-        await db_source.connect()
-        
-        # Test health-focused products
-        print("\n🏥 Health-focused products:")
-        health_products = await db_source.get_health_focused_products(min_health_score=7, limit=5)
-        for product in health_products[:3]:
-            print(f"   - {product['product_name']}: Health {product['ai_health_score']}/10, Grade {product['ai_nutrition_grade']}")
-        
-        # Test diet compatibility
-        print("\n🌱 Vegan products:")
-        vegan_products = await db_source.get_diet_compatible_products("vegan", limit=3)
-        for product in vegan_products:
-            print(f"   - {product['product_name']}: {product['ai_diet_compatibility']}")
-        
-        # Test smart deals
-        print("\n💰 Smart shopping deals:")
-        deals = await db_source.get_smart_shopping_deals("good")
-        for deal in deals[:3]:
-            print(f"   - {deal['product_name']}: {deal['discount_percentage']}% off, Deal Quality: {deal['ai_deal_quality']}")
-        
-        # Test meal planning
-        print("\n🍽️ Breakfast meal suggestions:")
-        breakfast = await db_source.get_meal_planning_suggestions("breakfast", "simple")
-        for meal in breakfast[:3]:
-            print(f"   - {meal['product_name']}: Prep: {meal['ai_preparation_complexity']}")
-        
-        print("\n✅ Enhanced database features test completed successfully!")
-        
-    except Exception as e:
-        print(f"❌ Enhanced features test failed: {e}")
-        
-    finally:
-        db_source.disconnect()
-
 if __name__ == "__main__":
     # Run enhanced features test
-    asyncio.run(test_enhanced_features())
+    asyncio.run()

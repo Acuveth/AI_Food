@@ -3,7 +3,7 @@
 
 :root {
   --primary-gradient: linear-gradient(135deg, #2e2e2e 0%, #000000 100%);
-  --secondary-gradient: linear-gradient(135deg, #161116 0%, #ffffff 100%);
+  --secondary-gradient: linear-gradient(135deg, #c41c1c 0%, #ffffff 100%);
   --success-gradient: linear-gradient(135deg, #362130 0%, #000000 100%);
   --warning-gradient: linear-gradient(135deg, #66444f 0%, #fee140 100%);
   --glass-bg: rgba(255, 255, 255, 0.25);

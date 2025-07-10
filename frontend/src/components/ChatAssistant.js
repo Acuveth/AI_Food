@@ -27,7 +27,7 @@ const ChatAssistant = () => {
     { text: "Budget meal plan 🍽️", query: "Ustvari načrt obrokov za 2 osebi z 50 EUR" },
     { text: "Compare bread prices 🍞", query: "Primerjaj cene kruha v različnih trgovinah" },
     { text: "Healthy breakfast ideas 🌅", query: "Predlagaj zdrav zajtrk z visokimi zdravstvenimi ocenami" },
-    { text: "Vegan products 🌱", query: "Najdi veganske izdelke" }
+    { text: "Product insights 📊", query: "Pokaži vpogled v cene in kvaliteto mleka" }
   ];
 
   const sendMessage = async (message = inputValue) => {
@@ -47,8 +47,9 @@ const ChatAssistant = () => {
           content: response.data.response,
           function_used: response.data.function_used,
           function_result: response.data.function_result,
-          semantic_validation: response.data.semantic_validation,
+          dynamic_validation: response.data.dynamic_validation,
           validation_applied: response.validation_applied,
+          validation_details: response.validation_details,
           timestamp: new Date()
         };
         setMessages(prev => [...prev, botMessage]);
@@ -87,29 +88,34 @@ const ChatAssistant = () => {
     return timestamp ? timestamp.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }) : '';
   };
 
-  const renderValidationInfo = (msg) => {
-    if (!msg.validation_applied || !msg.function_result) return null;
+  const renderDynamicValidationInfo = (msg) => {
+    if (!msg.validation_applied && !msg.dynamic_validation) return null;
 
+    const details = msg.validation_details;
     const result = msg.function_result;
-    let validationContent = null;
 
-    // Handle different types of function results
-    if (result.success === false && result.suggestions) {
-      // Search with suggestions
-      validationContent = (
-        <div className="validation-info suggestions">
+    // Handle different types of dynamic validation results
+    if (result?.success === false && result?.suggestions) {
+      // No valid products found with suggestions
+      return (
+        <div className="validation-info dynamic-suggestions">
           <div className="validation-header">
-            <span className="validation-icon">🔍</span>
-            <span>Semantična validacija</span>
+            <span className="validation-icon">🧠</span>
+            <span>Dinamična LLM validacija</span>
           </div>
           <div className="validation-content">
-            <p>Preprečil sem napačne zadetke za "{result.search_term}"</p>
+            <p>Analiziral sem bazo podatkov za "{result.search_term}" in ni našel ustreznih izdelkov.</p>
+            {result.validation_reasoning && (
+              <div className="validation-reasoning">
+                <strong>Razlog:</strong> {result.validation_reasoning}
+              </div>
+            )}
             {result.raw_results_count > 0 && (
-              <p>Našel {result.raw_results_count} izdelkov, toda nobeden ni ustrezal vašemu iskanju.</p>
+              <p>Našel sem {result.raw_results_count} izdelkov v bazi, a noben ni ustrezal vaši zahtevi.</p>
             )}
             {result.suggestions && result.suggestions.length > 0 && (
-              <div className="search-suggestions">
-                <p><strong>Poskusite z:</strong></p>
+              <div className="smart-suggestions">
+                <p><strong>Pametni predlogi na osnovi analize baze:</strong></p>
                 <div className="suggestion-buttons">
                   {result.suggestions.map((suggestion, index) => (
                     <button
@@ -126,43 +132,109 @@ const ChatAssistant = () => {
           </div>
         </div>
       );
-    } else if (result.success === true && result.validation_applied) {
-      // Successful search with validation
-      validationContent = (
-        <div className="validation-info success">
+    } else if (result?.success === true && details) {
+      // Successful search with dynamic validation details
+      return (
+        <div className="validation-info dynamic-success">
           <div className="validation-header">
-            <span className="validation-icon">✅</span>
-            <span>Validacija uspešna</span>
+            <span className="validation-icon">🎯</span>
+            <span>Dinamična validacija uspešna</span>
           </div>
           <div className="validation-content">
-            <p>Vrnil sem samo ustrezne izdelke za "{result.search_term}"</p>
-            <p>Izključil sem napačne zadetke (npr. čokolada pri iskanju mleka)</p>
+            <p>Uporabil sem pametno LLM analizo za "{result.search_term}"</p>
+            
+            {details.reasoning && (
+              <div className="validation-reasoning">
+                <strong>Analiza:</strong> {details.reasoning}
+              </div>
+            )}
+            
+            <div className="validation-stats">
+              {details.confidence && (
+                <div className="confidence-score">
+                  <span className="stat-label">Zaupanje validacije:</span>
+                  <div className="confidence-bar">
+                    <div 
+                      className="confidence-fill"
+                      style={{ 
+                        width: `${(details.confidence * 100)}%`,
+                        backgroundColor: details.confidence >= 0.8 ? '#10b981' : 
+                                       details.confidence >= 0.6 ? '#f59e0b' : '#ef4444'
+                      }}
+                    ></div>
+                  </div>
+                  <span className="confidence-value">{(details.confidence * 100).toFixed(0)}%</span>
+                </div>
+              )}
+              
+              {details.invalid_products_filtered > 0 && (
+                <p>🚫 Izločil sem {details.invalid_products_filtered} nepomembnih izdelkov</p>
+              )}
+            </div>
           </div>
         </div>
       );
-    } else if (result.shopping_list_result?.validation_applied) {
-      // Shopping list with validation
-      const issues = result.shopping_list_result.validation_issues;
-      if (issues && issues.length > 0) {
-        validationContent = (
-          <div className="validation-info warnings">
-            <div className="validation-header">
-              <span className="validation-icon">⚠️</span>
-              <span>Validacijska opozorila</span>
-            </div>
-            <div className="validation-content">
-              <ul>
-                {issues.map((issue, index) => (
-                  <li key={index}>{issue}</li>
-                ))}
-              </ul>
-            </div>
+    } else if (result?.insights_result) {
+      // Product insights with LLM analysis
+      const insights = result.insights_result.insights;
+      return (
+        <div className="validation-info insights">
+          <div className="validation-header">
+            <span className="validation-icon">📊</span>
+            <span>LLM Analiza Izdelka</span>
           </div>
-        );
-      }
+          <div className="validation-content">
+            {insights?.summary && (
+              <div className="insights-summary">
+                <strong>Povzetek:</strong> {insights.summary}
+              </div>
+            )}
+            
+            {insights?.price_analysis && (
+              <div className="price-insights">
+                <h5>💰 Cenovna analiza:</h5>
+                <ul>
+                  <li>Najcenejša cena: €{insights.price_analysis.cheapest_price?.toFixed(2)}</li>
+                  <li>Najdražja cena: €{insights.price_analysis.most_expensive_price?.toFixed(2)}</li>
+                  <li>Povprečna cena: €{insights.price_analysis.average_price?.toFixed(2)}</li>
+                  {insights.price_analysis.best_value_store && (
+                    <li>Najboljša vrednost: {insights.price_analysis.best_value_store}</li>
+                  )}
+                </ul>
+              </div>
+            )}
+            
+            {insights?.recommendations && insights.recommendations.length > 0 && (
+              <div className="ai-recommendations">
+                <h5>💡 AI priporočila:</h5>
+                <ul>
+                  {insights.recommendations.map((rec, index) => (
+                    <li key={index}>{rec}</li>
+                  ))}
+                </ul>
+              </div>
+            )}
+          </div>
+        </div>
+      );
     }
 
-    return validationContent;
+    // Generic dynamic validation badge
+    if (msg.dynamic_validation) {
+      return (
+        <div className="validation-info dynamic-generic">
+          <div className="validation-header">
+            <span className="validation-icon">🧠</span>
+            <span>Dinamična LLM validacija</span>
+          </div>
+          <div className="validation-content">
+            <p>Rezultati so bili analizirani z naprednim LLM sistemom za boljšo natančnost</p>
+          </div>
+        </div>
+      );
+    }
+
+    return null;
   };
 
   return (
@@ -170,33 +242,68 @@ const ChatAssistant = () => {
       <div className="chat-messages">
         {messages.length === 0 && (
           <div className="welcome-message">
-            <div className="welcome-avatar">🤖</div>
-            <h3>Pozdravljeni v izboljšanem slovenskem grocery asistentintelligence!</h3>
-            <p>Zdaj z <strong>semantično validacijo</strong> - ne več napačnih zadetkov!</p>
+            <div className="welcome-avatar">🧠</div>
+            <h3>Pozdravljeni v revolucionalni slovenščini grocery intelligence!</h3>
+            <p>Zdaj z <strong>dinamično LLM validacijo</strong> - brez trdno kodiranih pravil!</p>
             
-            <div className="validation-highlight">
-              <h4>🔍 Nove možnosti validacije:</h4>
+            <div className="dynamic-validation-highlight">
+              <h4>🚀 Revolucionarne izboljšave:</h4>
               <div className="validation-features">
                 <div className="validation-feature">
-                  <span className="feature-icon">✅</span>
+                  <span className="feature-icon">🧠</span>
                   <div>
-                    <strong>Natančni zadetki</strong>
-                    <p>Ko iščete "mleko", ne boste več dobili "MLEČNA REZINA MILKA"</p>
+                    <strong>Dinamična LLM analiza</strong>
+                    <p>Inteligentno razumevanje vaših potreb brez vnaprej določenih pravil</p>
+                  </div>
+                </div>
+                <div className="validation-feature">
+                  <span className="feature-icon">📊</span>
+                  <div>
+                    <strong>Analiza vsebine baze</strong>
+                    <p>Najprej analizira, kaj je dejansko v bazi, nato filtrira</p>
+                  </div>
+                </div>
+                <div className="validation-feature">
+                  <span className="feature-icon">🎯</span>
+                  <div>
+                    <strong>Kontekstno razumevanje</strong>
+                    <p>Razume namere uporabnika, ne le dobesednih besed</p>
                   </div>
                 </div>
                 <div className="validation-feature">
                   <span className="feature-icon">💡</span>
                   <div>
                     <strong>Pametni predlogi</strong>
-                    <p>Predlagam alternativne iskalne termine, če ni zadetkov</p>
+                    <p>Inteligentne alternative na osnovi dejanske vsebine baze</p>
                   </div>
                 </div>
                 <div className="validation-feature">
-                  <span className="feature-icon">🎯</span>
+                  <span className="feature-icon">📈</span>
                   <div>
-                    <strong>Prepoznavanje namena</strong>
-                    <p>Razumem, kaj dejansko iščete, ne samo besede</p>
+                    <strong>Transparentnost validacije</strong>
+                    <p>Pojasnilo zakaj so bili izdelki vključeni ali izključeni</p>
                   </div>
+                </div>
+              </div>
+            </div>
+            
+            <div className="capabilities-showcase">
+              <h4>🎯 Kaj znoja nova tehnologija:</h4>
+              <div className="capability-examples">
+                <div className="capability-example">
+                  <div className="example-search">"mleko"</div>
+                  <div className="example-arrow">→</div>
+                  <div className="example-result">Analizira bazo, razume da potrebujete mleko, filtrira čokolade</div>
+                </div>
+                <div className="capability-example">
+                  <div className="example-search">"kruh"</div>
+                  <div className="example-arrow">→</div>
+                  <div className="example-result">Razlikuje med kruhom in drobtinami na osnovi konteksta</div>
+                </div>
+                <div className="capability-example">
+                  <div className="example-search">Ni zadetkov</div>
+                  <div className="example-arrow">→</div>
+                  <div className="example-result">Generira pametne predloge na osnovi dostopnih izdelkov</div>
                 </div>
               </div>
             </div>
@@ -204,30 +311,30 @@ const ChatAssistant = () => {
             <div className="welcome-features">
               <div className="feature-grid">
                 <div className="feature-item">
-                  <span className="feature-icon">🔍</span>
-                  <h4>Validiran iskanje</h4>
-                  <p>Samo ustrezni izdelki</p>
+                  <span className="feature-icon">🧠</span>
+                  <h4>LLM Validacija</h4>
+                  <p>Dinamično razumevanje</p>
                 </div>
                 <div className="feature-item">
-                  <span className="feature-icon">💰</span>
-                  <h4>Pametno načrtovanje</h4>
-                  <p>Optimizirani seznami za nakupovanje</p>
+                  <span className="feature-icon">📊</span>
+                  <h4>Produkt Insights</h4>
+                  <p>Podrobne analize z AI</p>
                 </div>
                 <div className="feature-item">
-                  <span className="feature-icon">🎁</span>
-                  <h4>Žive promocije</h4>
-                  <p>Nikoli ne zamudite odličnih ponudb</p>
+                  <span className="feature-icon">💡</span>
+                  <h4>Pametni predlogi</h4>
+                  <p>Na osnovi vsebine baze</p>
                 </div>
                 <div className="feature-item">
-                  <span className="feature-icon">🏪</span>
-                  <h4>Primerjava trgovin</h4>
-                  <p>Cene v vseh glavnih trgovinah</p>
+                  <span className="feature-icon">🎯</span>
+                  <h4>Kontekstna točnost</h4>
+                  <p>Razume vaše potrebe</p>
                 </div>
               </div>
             </div>
 
             <div className="quick-questions">
-              <h4>Preizkusite ta vprašanja:</h4>
+              <h4>Preizkusite nova zmogljivosti:</h4>
               <div className="quick-questions-grid">
                 {quickQuestions.map((question, index) => (
                   <button
@@ -246,7 +353,7 @@ const ChatAssistant = () => {
         {messages.map((msg, index) => (
           <div key={index} className={`message ${msg.role} ${msg.error ? 'error' : ''}`}>
             <div className="message-avatar">
-              {msg.role === 'user' ? '👤' : '🤖'}
+              {msg.role === 'user' ? '👤' : '🧠'}
             </div>
             <div className="message-bubble">
               <div className="message-content">
@@ -257,17 +364,17 @@ const ChatAssistant = () => {
                   <div className="function-used">
                     <span className="function-icon">⚡</span>
                     Funkcija: {msg.function_used}
-                    {msg.semantic_validation && (
-                      <span className="validation-badge">
-                        <span className="validation-icon">🔍</span>
-                        Validacija
+                    {msg.dynamic_validation && (
+                      <span className="validation-badge dynamic">
+                        <span className="validation-icon">🧠</span>
+                        Dinamična LLM validacija
                       </span>
                     )}
                   </div>
                 )}
                 
-                {/* Validation information */}
-                {renderValidationInfo(msg)}
+                {/* Dynamic validation information */}
+                {renderDynamicValidationInfo(msg)}
               </div>
               
               {msg.timestamp && (
@@ -281,7 +388,7 @@ const ChatAssistant = () => {
         
         {loading && (
           <div className="message assistant">
-            <div className="message-avatar">🤖</div>
+            <div className="message-avatar">🧠</div>
             <div className="message-bubble">
               <div className="message-content">
                 <div className="typing-indicator">
@@ -289,7 +396,7 @@ const ChatAssistant = () => {
                   <span></span>
                   <span></span>
                 </div>
-                <div className="typing-text">AI razmišlja in validira rezultate...</div>
+                <div className="typing-text">LLM analizira bazo podatkov in validira rezultate...</div>
               </div>
             </div>
           </div>
@@ -305,7 +412,7 @@ const ChatAssistant = () => {
             value={inputValue}
             onChange={(e) => setInputValue(e.target.value)}
             onKeyPress={handleKeyPress}
-            placeholder="Vprašajte o cenah, promocijah ali načrtovanju obrokov..."
+            placeholder="Vprašajte o cenah, analizah ali načrtovanju... Nova LLM validacija bo razumela vaš namen!"
             disabled={loading}
             maxLength={500}
           />
@@ -317,7 +424,7 @@ const ChatAssistant = () => {
               disabled={loading || !inputValue.trim()}
             >
               <span className="send-icon">
-                {loading ? '⏳' : '🚀'}
+                {loading ? '⏳' : '🧠'}
               </span>
               Pošlji
             </button>
@@ -326,30 +433,46 @@ const ChatAssistant = () => {
       </div>
       
       <style jsx>{`
-        .validation-highlight {
-          background: linear-gradient(135deg, rgba(16, 185, 129, 0.1), rgba(59, 130, 246, 0.1));
-          border: 1px solid rgba(16, 185, 129, 0.2);
+        .dynamic-validation-highlight {
+          background: linear-gradient(135deg, rgba(59, 130, 246, 0.1), rgba(16, 185, 129, 0.1));
+          border: 1px solid rgba(59, 130, 246, 0.2);
           border-radius: 16px;
           padding: 25px;
           margin: 30px 0;
           backdrop-filter: blur(10px);
         }
         
-        .validation-highlight h4 {
+        .dynamic-validation-highlight h4 {
           color: var(--text-primary);
           margin-bottom: 20px;
           font-size: 1.2em;
           text-align: center;
         }
         
-        .validation-features {
+        .capabilities-showcase {
+          background: rgba(16, 185, 129, 0.1);
+          border: 1px solid rgba(16, 185, 129, 0.2);
+          border-radius: 16px;
+          padding: 25px;
+          margin: 30px 0;
+        }
+        
+        .capabilities-showcase h4 {
+          color: var(--text-primary);
+          margin-bottom: 20px;
+          font-size: 1.2em;
+          text-align: center;
+        }
+        
+        .capability-examples {
           display: grid;
           gap: 15px;
         }
         
-        .validation-feature {
-          display: flex;
-          align-items: flex-start;
+        .capability-example {
+          display: grid;
+          grid-template-columns: 1fr auto 2fr;
+          align-items: center;
           gap: 15px;
           padding: 15px;
           background: rgba(255, 255, 255, 0.1);
@@ -357,155 +480,165 @@ const ChatAssistant = () => {
           border: 1px solid rgba(255, 255, 255, 0.1);
         }
         
-        .validation-feature .feature-icon {
-          font-size: 1.5em;
-          flex-shrink: 0;
-        }
-        
-        .validation-feature strong {
+        .example-search {
+          font-family: 'Courier New', monospace;
+          background: rgba(59, 130, 246, 0.2);
+          padding: 8px 12px;
+          border-radius: 8px;
           color: var(--text-primary);
-          font-size: 1.1em;
-          display: block;
-          margin-bottom: 5px;
+          font-weight: 600;
+          text-align: center;
         }
         
-        .validation-feature p {
+        .example-arrow {
+          font-size: 1.5em;
+          color: var(--text-secondary);
+        }
+        
+        .example-result {
           color: var(--text-secondary);
           font-size: 0.9em;
           line-height: 1.4;
-          margin: 0;
         }
         
-        .validation-info {
-          margin-top: 15px;
-          padding: 15px;
-          border-radius: 12px;
-          border: 1px solid rgba(255, 255, 255, 0.2);
-          backdrop-filter: blur(10px);
-        }
-        
-        .validation-info.success {
-          background: rgba(16, 185, 129, 0.1);
-          border-color: rgba(16, 185, 129, 0.3);
-        }
-        
-        .validation-info.suggestions {
+        .validation-info.dynamic-suggestions {
           background: rgba(59, 130, 246, 0.1);
           border-color: rgba(59, 130, 246, 0.3);
         }
         
-        .validation-info.warnings {
-          background: rgba(245, 158, 11, 0.1);
-          border-color: rgba(245, 158, 11, 0.3);
+        .validation-info.dynamic-success {
+          background: rgba(16, 185, 129, 0.1);
+          border-color: rgba(16, 185, 129, 0.3);
         }
         
-        .validation-header {
-          display: flex;
-          align-items: center;
-          gap: 8px;
-          font-weight: 600;
-          color: var(--text-primary);
-          margin-bottom: 10px;
-          font-size: 0.9em;
+        .validation-info.insights {
+          background: rgba(147, 51, 234, 0.1);
+          border-color: rgba(147, 51, 234, 0.3);
         }
         
-        .validation-icon {
-          font-size: 1.1em;
+        .validation-info.dynamic-generic {
+          background: rgba(99, 102, 241, 0.1);
+          border-color: rgba(99, 102, 241, 0.3);
         }
         
-        .validation-content {
-          color: var(--text-secondary);
+        .validation-reasoning {
+          margin: 10px 0;
+          padding: 12px;
+          background: rgba(255, 255, 255, 0.1);
+          border-radius: 8px;
+          border-left: 3px solid rgba(59, 130, 246, 0.5);
           font-size: 0.9em;
           line-height: 1.4;
         }
         
-        .validation-content p {
-          margin: 5px 0;
+        .validation-stats {
+          margin-top: 15px;
         }
         
-        .validation-content ul {
-          margin: 10px 0;
-          padding-left: 20px;
+        .confidence-score {
+          display: flex;
+          align-items: center;
+          gap: 10px;
+          margin-bottom: 10px;
         }
         
-        .validation-content li {
-          margin: 5px 0;
+        .stat-label {
+          font-size: 0.9em;
+          color: var(--text-secondary);
+          font-weight: 500;
+          min-width: 120px;
         }
         
-        .search-suggestions {
+        .confidence-bar {
+          flex: 1;
+          height: 8px;
+          background: rgba(0, 0, 0, 0.1);
+          border-radius: 4px;
+          overflow: hidden;
+        }
+        
+        .confidence-fill {
+          height: 100%;
+          transition: width 0.5s ease;
+          border-radius: 4px;
+        }
+        
+        .confidence-value {
+          font-size: 0.9em;
+          font-weight: 600;
+          color: var(--text-primary);
+          min-width: 40px;
+          text-align: right;
+        }
+        
+        .smart-suggestions {
           margin-top: 15px;
           padding-top: 15px;
           border-top: 1px solid rgba(255, 255, 255, 0.1);
         }
         
-        .suggestion-buttons {
-          display: flex;
-          flex-wrap: wrap;
-          gap: 8px;
-          margin-top: 10px;
+        .insights-summary {
+          background: rgba(147, 51, 234, 0.1);
+          padding: 12px;
+          border-radius: 8px;
+          margin-bottom: 15px;
+          border-left: 3px solid rgba(147, 51, 234, 0.5);
         }
         
-        .suggestion-btn {
-          background: rgba(255, 255, 255, 0.1);
+        .price-insights, .ai-recommendations {
+          margin: 15px 0;
+        }
+        
+        .price-insights h5, .ai-recommendations h5 {
           color: var(--text-primary);
-          border: 1px solid rgba(255, 255, 255, 0.2);
-          padding: 6px 12px;
-          border-radius: 15px;
-          cursor: pointer;
-          font-size: 0.85em;
-          transition: all 0.3s ease;
-          backdrop-filter: blur(5px);
+          margin-bottom: 10px;
+          font-size: 1em;
         }
         
-        .suggestion-btn:hover {
-          background: rgba(59, 130, 246, 0.2);
-          border-color: rgba(59, 130, 246, 0.4);
-          transform: translateY(-2px);
+        .price-insights ul, .ai-recommendations ul {
+          margin: 8px 0;
+          padding-left: 20px;
         }
         
-        .validation-badge {
-          display: inline-flex;
-          align-items: center;
-          gap: 4px;
-          margin-left: 10px;
-          padding: 2px 8px;
-          background: rgba(16, 185, 129, 0.2);
-          border-radius: 10px;
-          font-size: 0.75em;
-          color: rgba(16, 185, 129, 0.9);
-        }
-        
-        .validation-badge .validation-icon {
+        .price-insights li, .ai-recommendations li {
+          color: var(--text-secondary);
+          margin: 5px 0;
           font-size: 0.9em;
         }
         
-        .function-used {
-          display: flex;
-          align-items: center;
-          flex-wrap: wrap;
-          gap: 5px;
+        .validation-badge.dynamic {
+          background: linear-gradient(135deg, rgba(59, 130, 246, 0.2), rgba(16, 185, 129, 0.2));
+          border: 1px solid rgba(59, 130, 246, 0.3);
+          color: var(--text-primary);
+        }
+        
+        .validation-badge.dynamic .validation-icon {
+          font-size: 0.9em;
         }
         
         @media (max-width: 768px) {
-          .validation-features {
+          .capability-example {
             grid-template-columns: 1fr;
+            text-align: center;
+            gap: 10px;
           }
           
-          .validation-feature {
-            flex-direction: column;
-            align-items: flex-start;
+          .example-arrow {
+            display: none;
           }
           
-          .validation-feature .feature-icon {
-            margin-bottom: 5px;
-          }
-          
-          .suggestion-buttons {
+          .confidence-score {
             flex-direction: column;
             align-items: stretch;
+            gap: 8px;
           }
           
-          .suggestion-btn {
+          .stat-label {
+            min-width: auto;
+            text-align: center;
+          }
+          
+          .confidence-value {
             text-align: center;
           }
         }
