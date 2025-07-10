@@ -35,8 +35,11 @@ class ApiService {
     });
   }
 
-  async getPromotions() {
-    return this.request('/api/promotions');
+  async getPromotions(store = null, category = null, min_discount = 10) {
+    return this.request('/api/promotions', {
+      method: 'POST',
+      body: JSON.stringify({ store, category, min_discount }),
+    });
   }
 
   async healthCheck() {
