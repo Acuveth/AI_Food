@@ -569,7 +569,7 @@ def _analyze_cooking_times(meals: List) -> Dict[str, Any]:
 # Updated system message to include meal search capabilities
 ENHANCED_SYSTEM_MESSAGE_WITH_MEALS = """You are an advanced AI grocery shopping assistant for Slovenia with revolutionary think-first approach AND comprehensive meal search capabilities.
 
-🧠 **Your Revolutionary Think-First Approach:**
+🧠 **Your Think-First Approach:**
 Instead of directly searching the database (which has missing data), you now use a much smarter approach PLUS you can search for meals using multiple recipe APIs and integrate them with grocery shopping.
 
 **How Think-First + Meal Search Works:**
@@ -619,6 +619,35 @@ The think-first approach + meal search ensures you provide the most complete mea
 
 Respond in Slovenian when appropriate, and always highlight when the meal search + grocery integration provided comprehensive solutions.
 """
+class MealDetailsRequest(BaseModel):
+    meal_data: Dict[str, Any] = Field(..., description="Complete meal data from the meal card")
+
+
+@meal_router.get("/details/{meal_id}")
+async def get_meal_details(
+    meal_id: str,
+    meal_data: dict,  # Passed as JSON body
+    grocery_mcp=Depends(lambda: None)
+):
+    """
+    Get detailed meal information with grocery integration for a selected meal
+    """
+    try:
+        logger.info(f"🛒 Getting detailed info for meal: {meal_id}")
+        
+        async with EnhancedMealSearchManager(grocery_mcp) as meal_manager:
+            result = await meal_manager.get_meal_details_with_grocery(meal_id, meal_data)
+        
+        return {
+            "success": result["success"],
+            "data": result,
+            "message": result.get("message", "Meal details retrieved")
+        }
+    
+    except Exception as e:
+        logger.error(f"Meal details error: {str(e)}")
+        raise HTTPException(status_code=500, detail=f"Failed to get meal details: {str(e)}")
+
 
 # Function to execute meal search functions
 async def execute_meal_function(function_name: str, arguments: dict, grocery_mcp) -> dict:
@@ -631,6 +660,15 @@ async def execute_meal_function(function_name: str, arguments: dict, grocery_mcp
                 max_results=arguments.get("max_results", 8)
             )
             return {"meal_search_result": result}
+        
+        elif function_name == "get_meal_details_with_grocery":
+            # NEW: Handle meal details request
+            async with EnhancedMealSearchManager(grocery_mcp) as meal_manager:
+                result = await meal_manager.get_meal_details_with_grocery(
+                    arguments["meal_id"], 
+                    arguments["meal_data"]
+                )
+            return {"meal_details_result": result}
         
         elif function_name == "create_meal_plan":
             request = MealPlanRequest(**arguments)

@@ -1,10 +1,15 @@
+// components/ChatAssistant.js - Updated with meal cards support
 import React, { useState, useRef, useEffect } from 'react';
 import ApiService from '../services/api';
+import MealCards, { MealDetailView } from './MealCards';
 
 const ChatAssistant = () => {
   const [messages, setMessages] = useState([]);
   const [inputValue, setInputValue] = useState('');
   const [loading, setLoading] = useState(false);
+  const [selectedMeal, setSelectedMeal] = useState(null);
+  const [mealDetails, setMealDetails] = useState(null);
+  const [showMealDetail, setShowMealDetail] = useState(false);
   const messagesEndRef = useRef(null);
   const inputRef = useRef(null);
 
@@ -21,11 +26,17 @@ const ChatAssistant = () => {
   }, []);
 
   const quickQuestions = [
-    "Find cheapest milk",
-    "Today's promotions", 
-    "Compare bread prices",
-    "Budget meal for 2 people"
+    "Find Italian lunch recipes",
+    "Healthy breakfast ideas", 
+    "Quick dinner for 2 people",
+    "Vegetarian meal options"
   ];
+
+  // Check if a message contains meal search results
+  const containsMealSearch = (content) => {
+    const mealKeywords = ['recipe', 'meal', 'lunch', 'dinner', 'breakfast', 'cook', 'ingredient'];
+    return mealKeywords.some(keyword => content.toLowerCase().includes(keyword));
+  };
 
   // Simple markdown processor for basic formatting
   const processMarkdown = (text) => {
@@ -61,6 +72,30 @@ const ChatAssistant = () => {
     setLoading(true);
 
     try {
+      // Check if this is likely a meal search request
+      if (containsMealSearch(message)) {
+        // Try meal search first
+        try {
+          const mealResponse = await ApiService.searchMeals(message);
+          
+          if (mealResponse.success && mealResponse.data.meals?.length > 0) {
+            const botMessage = { 
+              role: 'assistant', 
+              content: mealResponse.data.presentation?.summary || `Found ${mealResponse.data.meals.length} meal options for you!`,
+              timestamp: new Date(),
+              meals: mealResponse.data.meals,
+              isMealSearch: true
+            };
+            setMessages(prev => [...prev, botMessage]);
+            setLoading(false);
+            return;
+          }
+        } catch (mealError) {
+          console.log('Meal search failed, falling back to general chat:', mealError);
+        }
+      }
+
+      // Fallback to general chat
       const response = await ApiService.sendChatMessage(message);
       
       if (response.success) {
@@ -68,7 +103,7 @@ const ChatAssistant = () => {
           role: 'assistant', 
           content: response.data.response,
           timestamp: new Date(),
-          isMarkdown: true // Flag to indicate this needs markdown processing
+          isMarkdown: true
         };
         setMessages(prev => [...prev, botMessage]);
       } else {
@@ -91,6 +126,18 @@ const ChatAssistant = () => {
     }
   };
 
+  const handleMealSelect = (meal, details) => {
+    setSelectedMeal(meal);
+    setMealDetails(details);
+    setShowMealDetail(true);
+  };
+
+  const handleBackToMeals = () => {
+    setShowMealDetail(false);
+    setSelectedMeal(null);
+    setMealDetails(null);
+  };
+
   const handleKeyPress = (e) => {
     if (e.key === 'Enter' && !e.shiftKey) {
       e.preventDefault();
@@ -103,8 +150,34 @@ const ChatAssistant = () => {
   };
 
   const renderMessageContent = (msg) => {
+    // Show meal detail view if selected
+    if (showMealDetail && selectedMeal && mealDetails) {
+      return (
+        <MealDetailView 
+          meal={selectedMeal}
+          groceryDetails={mealDetails.grocery_details}
+          onBack={handleBackToMeals}
+        />
+      );
+    }
+
+    // Show meal cards
+    if (msg.isMealSearch && msg.meals) {
+      return (
+        <div className="meal-search-result">
+          <div className="message-content">
+            {msg.content}
+          </div>
+          <MealCards 
+            meals={msg.meals} 
+            onMealSelect={handleMealSelect}
+          />
+        </div>
+      );
+    }
+
+    // Regular markdown content
     if (msg.isMarkdown) {
-      // Process markdown and render as HTML
       const htmlContent = processMarkdown(msg.content);
       return (
         <div 
@@ -112,24 +185,24 @@ const ChatAssistant = () => {
           dangerouslySetInnerHTML={{ __html: htmlContent }}
         />
       );
-    } else {
-      // Regular text content
-      return (
-        <div className="message-content">
-          {msg.content}
-        </div>
-      );
-    }
+    } 
+
+    // Regular text content
+    return (
+      <div className="message-content">
+        {msg.content}
+      </div>
+    );
   };
 
   return (
     <div className="chat-container">
       <div className="chat-messages">
-        {messages.length === 0 && (
+        {messages.length === 0 && !showMealDetail && (
           <div className="welcome-message">
             <div className="welcome-avatar">🛒</div>
-            <h3>Slovenian Grocery Assistant</h3>
-            <p>Find the best prices across Slovenia's grocery stores</p>
+            <h3>Slovenian Grocery & Meal Assistant</h3>
+            <p>Find the best prices and discover delicious recipes with real grocery costs</p>
             
             <div className="quick-questions">
               <h4>Try asking:</h4>
@@ -148,9 +221,8 @@ const ChatAssistant = () => {
           </div>
         )}
         
-        {messages.map((msg, index) => (
+        {!showMealDetail && messages.map((msg, index) => (
           <div key={index} className={`message ${msg.role} ${msg.error ? 'error' : ''}`}>
-
             <div className="message-bubble">
               {renderMessageContent(msg)}
               {msg.timestamp && (
@@ -164,6 +236,14 @@ const ChatAssistant = () => {
             </div>
           </div>
         ))}
+
+        {showMealDetail && (
+          <div className="message assistant">
+            <div className="message-bubble full-width">
+              {renderMessageContent({ isMealSearch: false })}
+            </div>
+          </div>
+        )}
         
         {loading && (
           <div className="message assistant">
@@ -181,30 +261,32 @@ const ChatAssistant = () => {
         <div ref={messagesEndRef} />
       </div>
       
-      <div className="chat-input">
-        <div className="input-container">
-          <input
-            ref={inputRef}
-            type="text"
-            value={inputValue}
-            onChange={(e) => setInputValue(e.target.value)}
-            onKeyPress={handleKeyPress}
-            placeholder="Ask about grocery prices, deals, or products..."
-            disabled={loading}
-            maxLength={500}
-          />
-          <div className="input-actions">
-            <span className="char-counter">{inputValue.length}/500</span>
-            <button 
-              className="send-button"
-              onClick={() => sendMessage()}
-              disabled={loading || !inputValue.trim()}
-            >
-              {loading ? '⏳' : '→'}
-            </button>
+      {!showMealDetail && (
+        <div className="chat-input">
+          <div className="input-container">
+            <input
+              ref={inputRef}
+              type="text"
+              value={inputValue}
+              onChange={(e) => setInputValue(e.target.value)}
+              onKeyPress={handleKeyPress}
+              placeholder="Ask about meals, recipes, or grocery prices..."
+              disabled={loading}
+              maxLength={500}
+            />
+            <div className="input-actions">
+              <span className="char-counter">{inputValue.length}/500</span>
+              <button 
+                className="send-button"
+                onClick={() => sendMessage()}
+                disabled={loading || !inputValue.trim()}
+              >
+                {loading ? '⏳' : '→'}
+              </button>
+            </div>
           </div>
         </div>
-      </div>
+      )}
     </div>
   );
 };

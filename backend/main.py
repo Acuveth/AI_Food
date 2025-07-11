@@ -292,14 +292,34 @@ Respond in Slovenian when appropriate, and always highlight when the think-first
 
 ENHANCED_SYSTEM_MESSAGE = ENHANCED_SYSTEM_MESSAGE_WITH_MEALS
 
+ENHANCED_GROCERY_FUNCTIONS.append({
+    "type": "function", 
+    "function": {
+        "name": "get_meal_details_with_grocery",
+        "description": "Get detailed grocery information for a specific selected meal",
+        "parameters": {
+            "type": "object",
+            "properties": {
+                "meal_id": {"type": "string", "description": "ID of the selected meal"},
+                "meal_data": {"type": "object", "description": "Basic meal data from the meal card"}
+            },
+            "required": ["meal_id", "meal_data"]
+        }
+    }
+})
+
 async def execute_enhanced_function(function_name: str, arguments: dict, mcp: EnhancedSlovenianGroceryMCP, db_source: EnhancedDatabaseSource) -> dict:
     """Execute enhanced grocery functions with think-first approach"""
     try:
          # Check if it's a meal function
-        meal_functions = ["search_meals_by_request", "create_meal_plan", "get_meal_recommendations_by_ingredients", "create_grocery_shopping_list_from_meals"]
+        meal_functions = ["search_meals_by_request", "create_meal_plan", "get_meal_recommendations_by_ingredients", "create_grocery_shopping_list_from_meals", "get_meal_details_with_grocery" ]
         
         if function_name in meal_functions:
             return await execute_meal_function(function_name, arguments, mcp)
+
+        if function_name in meal_functions:
+            return await execute_meal_function(function_name, arguments, mcp)
+
 
         if function_name == "find_products_with_intelligent_validation":
             result = await mcp.find_cheapest_product_with_intelligent_suggestions(
