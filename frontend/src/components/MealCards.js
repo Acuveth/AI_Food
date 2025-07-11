@@ -1,13 +1,19 @@
-// components/MealCards.js - Enhanced with inline recipe display
+// components/MealCards.js - Enhanced with comprehensive grocery analysis
 import React, { useState } from 'react';
+import ApiService from '../services/api';
 
 const MealCards = ({ meals, onMealSelect }) => {
   const [selectedMeal, setSelectedMeal] = useState(null);
   const [showRecipe, setShowRecipe] = useState(false);
+  const [showGroceryAnalysis, setShowGroceryAnalysis] = useState(false);
+  const [groceryData, setGroceryData] = useState(null);
+  const [loadingGrocery, setLoadingGrocery] = useState(false);
 
   const handleMealClick = async (meal) => {
     setSelectedMeal(meal);
     setShowRecipe(true);
+    setShowGroceryAnalysis(false);
+    setGroceryData(null);
     
     // Scroll to recipe section
     setTimeout(() => {
@@ -20,7 +26,166 @@ const MealCards = ({ meals, onMealSelect }) => {
 
   const handleBackToMeals = () => {
     setShowRecipe(false);
+    setShowGroceryAnalysis(false);
     setSelectedMeal(null);
+    setGroceryData(null);
+  };
+
+  const handleBackToRecipe = () => {
+    setShowGroceryAnalysis(false);
+    setGroceryData(null);
+  };
+
+  // NEW: Enhanced grocery lookup with store-by-store analysis
+  const handleGroceryLookup = async () => {
+    if (!selectedMeal || !selectedMeal.ingredients) {
+      alert('No ingredients available for grocery lookup');
+      return;
+    }
+
+    setLoadingGrocery(true);
+    
+    try {
+      const ingredients = selectedMeal.ingredients.map(ing => ({
+        name: ing.name || ing.original || 'Unknown ingredient',
+        amount: ing.amount || '',
+        unit: ing.unit || '',
+        original: ing.original || ing.name || 'Unknown ingredient'
+      }));
+
+      // Search for each ingredient in the grocery database
+      const ingredientSearches = await Promise.all(
+        ingredients.map(async (ingredient) => {
+          try {
+            const searchResult = await ApiService.searchIngredient(ingredient.name);
+            return {
+              ingredient,
+              searchResult: searchResult.success ? searchResult.data.products : [],
+              found: searchResult.success && searchResult.data.products.length > 0
+            };
+          } catch (error) {
+            console.error(`Error searching for ${ingredient.name}:`, error);
+            return {
+              ingredient,
+              searchResult: [],
+              found: false
+            };
+          }
+        })
+      );
+
+      // Process results for store-by-store analysis
+      const storeAnalysis = analyzeStoreOptions(ingredientSearches);
+      const combinedAnalysis = analyzeCombinedCheapest(ingredientSearches);
+
+      setGroceryData({
+        ingredientSearches,
+        storeAnalysis,
+        combinedAnalysis,
+        totalIngredients: ingredients.length,
+        foundIngredients: ingredientSearches.filter(item => item.found).length
+      });
+
+      setShowGroceryAnalysis(true);
+
+      // Scroll to grocery analysis
+      setTimeout(() => {
+        const groceryElement = document.getElementById('grocery-analysis');
+        if (groceryElement) {
+          groceryElement.scrollIntoView({ behavior: 'smooth' });
+        }
+      }, 100);
+
+    } catch (error) {
+      console.error('Error during grocery lookup:', error);
+      alert('Failed to lookup grocery prices. Please try again.');
+    } finally {
+      setLoadingGrocery(false);
+    }
+  };
+
+  // Analyze cost if shopping at individual stores
+  const analyzeStoreOptions = (ingredientSearches) => {
+    const stores = ['dm', 'lidl', 'mercator', 'spar', 'tus'];
+    const storeAnalysis = {};
+
+    stores.forEach(store => {
+      let totalCost = 0;
+      let availableItems = 0;
+      let missingItems = [];
+
+      ingredientSearches.forEach(({ ingredient, searchResult }) => {
+        const storeProduct = searchResult.find(product => 
+          product.store_name && product.store_name.toLowerCase() === store.toLowerCase()
+        );
+
+        if (storeProduct && storeProduct.current_price) {
+          totalCost += storeProduct.current_price;
+          availableItems++;
+        } else {
+          missingItems.push(ingredient.name);
+        }
+      });
+
+      storeAnalysis[store] = {
+        totalCost: totalCost,
+        availableItems,
+        missingItems,
+        completeness: (availableItems / ingredientSearches.length) * 100
+      };
+    });
+
+    return storeAnalysis;
+  };
+
+  // Analyze cost using cheapest option for each ingredient
+  const analyzeCombinedCheapest = (ingredientSearches) => {
+    let totalCost = 0;
+    let availableItems = 0;
+    const itemDetails = [];
+
+    ingredientSearches.forEach(({ ingredient, searchResult }) => {
+      if (searchResult.length > 0) {
+        // Find cheapest option across all stores
+        const cheapestProduct = searchResult.reduce((cheapest, current) => {
+          if (!current.current_price) return cheapest;
+          if (!cheapest.current_price) return current;
+          return current.current_price < cheapest.current_price ? current : cheapest;
+        }, searchResult[0]);
+
+        if (cheapestProduct && cheapestProduct.current_price) {
+          totalCost += cheapestProduct.current_price;
+          availableItems++;
+          itemDetails.push({
+            ingredient: ingredient.name,
+            price: cheapestProduct.current_price,
+            store: cheapestProduct.store_name,
+            product: cheapestProduct
+          });
+        } else {
+          itemDetails.push({
+            ingredient: ingredient.name,
+            price: null,
+            store: null,
+            product: null
+          });
+        }
+      } else {
+        itemDetails.push({
+          ingredient: ingredient.name,
+          price: null,
+          store: null,
+          product: null
+        });
+      }
+    });
+
+    return {
+      totalCost,
+      availableItems,
+      itemDetails,
+      completeness: (availableItems / ingredientSearches.length) * 100
+    };
   };
 
   const formatCalories = (nutrition) => {
@@ -35,6 +200,8 @@ const MealCards = ({ meals, onMealSelect }) => {
     
     return (basePrice + (ingredientCount * 0.30) * complexityMultiplier).toFixed(2);
   };
+
+  const formatPrice = (price) => `€${(price || 0).toFixed(2)}`;
 
   if (!meals || meals.length === 0) {
     return (
@@ -61,14 +228,14 @@ const MealCards = ({ meals, onMealSelect }) => {
                   src={meal.image_url} 
                   alt={meal.title}
                   onError={(e) => {
-                    e.target.src = '/placeholder-meal.jpg';
+                    e.target.style.display = 'none';
+                    e.target.nextSibling.style.display = 'flex';
                   }}
                 />
-              ) : (
-                <div className="meal-image-placeholder">
-                  <span>🍽️</span>
-                </div>
-              )}
+              ) : null}
+              <div className="meal-image-placeholder" style={{ display: meal.image_url ? 'none' : 'flex' }}>
+                <span>🍽️</span>
+              </div>
             </div>
             
             <div className="meal-card-content">
@@ -87,7 +254,7 @@ const MealCards = ({ meals, onMealSelect }) => {
                 
                 <div className="meal-stat">
                   <span className="stat-icon">👥</span>
-                  <span>{meal.servings || 2} servings</span>
+                  <span>{meal.servings || 2}</span>
                 </div>
               </div>
               
@@ -113,7 +280,7 @@ const MealCards = ({ meals, onMealSelect }) => {
       </div>
       
       {/* Inline Recipe Display */}
-      {showRecipe && selectedMeal && (
+      {showRecipe && selectedMeal && !showGroceryAnalysis && (
         <div id="recipe-display" className="recipe-display-container">
           <div className="recipe-header">
             <button className="back-to-meals-btn" onClick={handleBackToMeals}>
@@ -299,20 +466,107 @@ const MealCards = ({ meals, onMealSelect }) => {
                 
                 <button 
                   className="action-btn grocery-btn"
-                  onClick={() => onMealSelect && onMealSelect(selectedMeal, null)}
+                  onClick={handleGroceryLookup}
+                  disabled={loadingGrocery}
                 >
-                  🛒 Get Grocery List
+                  {loadingGrocery ? '⏳ Analyzing...' : '🛒 Find Grocery Prices'}
                 </button>
               </div>
             </div>
           </div>
         </div>
       )}
+
+      {/* Enhanced Grocery Analysis Display */}
+      {showGroceryAnalysis && groceryData && (
+        <div id="grocery-analysis" className="grocery-analysis-container">
+          <div className="grocery-analysis-header">
+            <button className="back-button" onClick={handleBackToRecipe}>
+              ← Back to Recipe
+            </button>
+            <h2>🛒 Grocery Price Analysis for: {selectedMeal.title}</h2>
+          </div>
+          
+          <div className="grocery-analysis-content">
+            {/* Summary Stats */}
+            <div className="analysis-summary">
+              <p>Found prices for <strong>{groceryData.foundIngredients}</strong> out of <strong>{groceryData.totalIngredients}</strong> ingredients in Slovenian stores.</p>
+            </div>
+
+            {/* Store-by-Store Cost Comparison */}
+            <h3>💰 Store-by-Store Cost Comparison</h3>
+            <div className="cost-comparison">
+              {Object.entries(groceryData.storeAnalysis).map(([store, analysis]) => (
+                <div 
+                  key={store} 
+                  className={`store-cost-card ${analysis.completeness === 100 ? 'best-option' : ''}`}
+                >
+                  <div className="store-name">{store.toUpperCase()}</div>
+                  <div className="store-total-cost">{formatPrice(analysis.totalCost)}</div>
+                  <div className="store-availability">
+                    {analysis.availableItems}/{groceryData.totalIngredients} ingredients available
+                  </div>
+                  <div className="store-availability">
+                    {analysis.completeness.toFixed(0)}% complete
+                  </div>
+                  {analysis.missingItems.length > 0 && (
+                    <div className="missing-items">
+                      <small>Missing: {analysis.missingItems.slice(0, 2).join(', ')}{analysis.missingItems.length > 2 ? '...' : ''}</small>
+                    </div>
+                  )}
+                </div>
+              ))}
+              
+              {/* Combined Cheapest Option */}
+              <div className="store-cost-card mixed-option">
+                <div className="store-name">MIXED CHEAPEST</div>
+                <div className="store-total-cost">{formatPrice(groceryData.combinedAnalysis.totalCost)}</div>
+                <div className="store-availability">
+                  {groceryData.combinedAnalysis.availableItems}/{groceryData.totalIngredients} ingredients found
+                </div>
+                <div className="store-availability">
+                  Best prices from all stores
+                </div>
+              </div>
+            </div>
+
+            {/* Detailed Ingredient Breakdown */}
+            <div className="ingredients-breakdown">
+              <h3>📝 Ingredient Price Breakdown</h3>
+              <div className="ingredients-list">
+                {groceryData.combinedAnalysis.itemDetails.map((item, index) => (
+                  <div key={index} className="ingredient-row">
+                    <span className="ingredient-name">{item.ingredient}</span>
+                    <div className="ingredient-prices">
+                      {item.price ? (
+                        <div className="price-option">
+                          <span className="price-store">{item.store}</span>
+                          <span className="price-amount cheapest">{formatPrice(item.price)}</span>
+                        </div>
+                      ) : (
+                        <span className="no-price">Not found in stores</span>
+                      )}
+                    </div>
+                  </div>
+                ))}
+              </div>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* Loading Overlay */}
+      {loadingGrocery && (
+        <div className="loading-overlay">
+          <div className="loading-spinner"></div>
+          <p>Analyzing grocery prices across Slovenian stores...</p>
+        </div>
+      )}
     </div>
   );
 };
 
-// Keep the existing MealDetailView for grocery integration
+// Keep the existing MealDetailView for compatibility
 const MealDetailView = ({ meal, groceryDetails, onBack }) => {
   if (!meal) return null;
 

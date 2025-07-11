@@ -7,12 +7,13 @@ Uses intelligent product generation before database search
 import os
 import json
 import logging
-from typing import List, Optional, Any
+from typing import List, Optional, Any, Dict
 from datetime import datetime
 from contextlib import asynccontextmanager
-
+import fastapi_meal_integration
 from fastapi import FastAPI, HTTPException, Depends, Query
 from fastapi.middleware.cors import CORSMiddleware
+from fastapi_meal_integration import get_enhanced_grocery_mcp
 from pydantic import BaseModel, Field
 from openai import OpenAI
 from dotenv import load_dotenv
@@ -87,6 +88,7 @@ app = FastAPI(
     version="6.0.0",
     lifespan=lifespan
 )
+
 app.include_router(meal_router)
 # Add CORS middleware
 app.add_middleware(
@@ -96,7 +98,7 @@ app.add_middleware(
     allow_methods=["*"],
     allow_headers=["*"],
 )
-
+app.dependency_overrides[fastapi_meal_integration.get_enhanced_grocery_mcp] = get_enhanced_grocery_mcp
 # Enhanced OpenAI function definitions with think-first approach
 ENHANCED_GROCERY_FUNCTIONS = [
     {
@@ -308,6 +310,7 @@ ENHANCED_GROCERY_FUNCTIONS.append({
     }
 })
 
+
 async def execute_enhanced_function(function_name: str, arguments: dict, mcp: EnhancedSlovenianGroceryMCP, db_source: EnhancedDatabaseSource) -> dict:
     """Execute enhanced grocery functions with think-first approach"""
     try:
@@ -419,6 +422,217 @@ class APIResponse(BaseModel):
     error: Optional[str] = None
     timestamp: datetime = Field(default_factory=datetime.now)
     approach: Optional[str] = None
+
+
+# New Pydantic models for meal cost analysis
+class IngredientRequest(BaseModel):
+    ingredients: List[Dict[str, Any]] = Field(..., description="List of ingredients to analyze")
+
+class CostAnalysisResponse(BaseModel):
+    success: bool
+    store_analysis: Dict[str, Any]
+    combined_analysis: Dict[str, Any]
+    ingredient_details: List[Dict[str, Any]]
+    message: Optional[str] = None
+
+
+# Add this route to your FastAPI app in main.py
+@app.post("/api/meals/cost-analysis", response_model=APIResponse)
+async def analyze_meal_costs(
+    request: IngredientRequest,
+    mcp: EnhancedSlovenianGroceryMCP = Depends(get_enhanced_grocery_mcp)
+):
+    """
+    Analyze grocery costs for meal ingredients across stores
+    """
+    try:
+        logger.info(f"🛒 Analyzing costs for {len(request.ingredients)} ingredients")
+        
+        # Search for each ingredient in the database
+        ingredient_results = []
+        
+        for ingredient in request.ingredients:
+            ingredient_name = ingredient.get('name', ingredient.get('original', ''))
+            if not ingredient_name:
+                continue
+                
+            try:
+                # Use the enhanced search with validation
+                search_result = await mcp.find_cheapest_product_with_intelligent_suggestions(
+                    product_name=ingredient_name
+                )
+                
+                ingredient_results.append({
+                    'ingredient': ingredient,
+                    'search_result': search_result.get('products', []) if search_result.get('success') else [],
+                    'found': search_result.get('success', False) and len(search_result.get('products', [])) > 0
+                })
+                
+            except Exception as e:
+                logger.warning(f"Error searching for ingredient '{ingredient_name}': {e}")
+                ingredient_results.append({
+                    'ingredient': ingredient,
+                    'search_result': [],
+                    'found': False
+                })
+        
+        # Analyze store-by-store costs
+        store_analysis = analyze_store_costs(ingredient_results)
+        
+        # Analyze combined cheapest costs
+        combined_analysis = analyze_combined_cheapest_costs(ingredient_results)
+        
+        return APIResponse(
+            success=True,
+            data={
+                "store_analysis": store_analysis,
+                "combined_analysis": combined_analysis,
+                "ingredient_details": ingredient_results,
+                "total_ingredients": len(request.ingredients),
+                "found_ingredients": len([r for r in ingredient_results if r['found']])
+            },
+            message=f"Analyzed costs for {len(ingredient_results)} ingredients across Slovenian stores"
+        )
+        
+    except Exception as e:
+        logger.error(f"Cost analysis error: {str(e)}")
+        return APIResponse(
+            success=False,
+            error=str(e),
+            message="Failed to analyze meal costs"
+        )
+
+def analyze_store_costs(ingredient_results: List[Dict]) -> Dict[str, Any]:
+    """Analyze costs if shopping at individual stores"""
+    stores = ['dm', 'lidl', 'mercator', 'spar', 'tus']
+    store_analysis = {}
+    
+    for store in stores:
+        total_cost = 0.0
+        available_items = 0
+        missing_items = []
+        found_products = []
+        
+        for result in ingredient_results:
+            ingredient = result['ingredient']
+            search_results = result['search_result']
+            
+            # Find product in this specific store
+            store_product = None
+            for product in search_results:
+                if (product.get('store_name', '').lower() == store.lower() and 
+                    product.get('current_price') and 
+                    product.get('current_price') > 0):
+                    store_product = product
+                    break
+            
+            if store_product:
+                total_cost += store_product['current_price']
+                available_items += 1
+                found_products.append({
+                    'ingredient': ingredient.get('name', ingredient.get('original', '')),
+                    'product': store_product,
+                    'price': store_product['current_price']
+                })
+            else:
+                missing_items.append(ingredient.get('name', ingredient.get('original', '')))
+        
+        store_analysis[store] = {
+            'store_name': store.upper(),
+            'total_cost': round(total_cost, 2),
+            'available_items': available_items,
+            'missing_items': missing_items,
+            'found_products': found_products,
+            'completeness': round((available_items / len(ingredient_results)) * 100, 1) if ingredient_results else 0
+        }
+    
+    return store_analysis
+
+def analyze_combined_cheapest_costs(ingredient_results: List[Dict]) -> Dict[str, Any]:
+    """Analyze costs using cheapest option for each ingredient across all stores"""
+    total_cost = 0.0
+    available_items = 0
+    item_details = []
+    
+    for result in ingredient_results:
+        ingredient = result['ingredient']
+        search_results = result['search_result']
+        
+        if search_results:
+            # Find the cheapest product across all stores
+            valid_products = [
+                p for p in search_results 
+                if p.get('current_price') and p.get('current_price') > 0
+            ]
+            
+            if valid_products:
+                cheapest_product = min(valid_products, key=lambda x: x['current_price'])
+                total_cost += cheapest_product['current_price']
+                available_items += 1
+                
+                item_details.append({
+                    'ingredient': ingredient.get('name', ingredient.get('original', '')),
+                    'price': cheapest_product['current_price'],
+                    'store': cheapest_product.get('store_name', ''),
+                    'product': cheapest_product,
+                    'found': True
+                })
+            else:
+                item_details.append({
+                    'ingredient': ingredient.get('name', ingredient.get('original', '')),
+                    'price': None,
+                    'store': None,
+                    'product': None,
+                    'found': False
+                })
+        else:
+            item_details.append({
+                'ingredient': ingredient.get('name', ingredient.get('original', '')),
+                'price': None,
+                'store': None,
+                'product': None,
+                'found': False
+            })
+    
+    return {
+        'total_cost': round(total_cost, 2),
+        'available_items': available_items,
+        'item_details': item_details,
+        'completeness': round((available_items / len(ingredient_results)) * 100, 1) if ingredient_results else 0,
+        'savings_vs_best_store': calculate_savings_vs_best_store(ingredient_results, total_cost)
+    }
+
+def calculate_savings_vs_best_store(ingredient_results: List[Dict], combined_cost: float) -> Dict[str, Any]:
+    """Calculate how much the combined approach saves vs shopping at the best single store"""
+    store_costs = analyze_store_costs(ingredient_results)
+    
+    # Find the best single store (lowest total cost for available items)
+    best_store = None
+    best_store_cost = float('inf')
+    
+    for store, analysis in store_costs.items():
+        if analysis['available_items'] > 0 and analysis['total_cost'] < best_store_cost:
+            best_store = store
+            best_store_cost = analysis['total_cost']
+    
+    if best_store and best_store_cost < float('inf'):
+        savings = best_store_cost - combined_cost
+        return {
+            'best_single_store': best_store.upper(),
+            'best_store_cost': round(best_store_cost, 2),
+            'combined_cost': round(combined_cost, 2),
+            'savings_amount': round(savings, 2),
+            'savings_percentage': round((savings / best_store_cost) * 100, 1) if best_store_cost > 0 else 0
+        }
+    
+    return {
+        'best_single_store': None,
+        'best_store_cost': 0,
+        'combined_cost': round(combined_cost, 2),
+        'savings_amount': 0,
+        'savings_percentage': 0
+    }
+
 
 # Enhanced Chat endpoint
 @app.post("/api/chat", response_model=APIResponse)

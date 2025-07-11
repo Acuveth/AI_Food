@@ -6,10 +6,9 @@ Adds meal search endpoints to your existing grocery intelligence backend
 
 from fastapi import APIRouter, HTTPException, Depends, Query
 from pydantic import BaseModel, Field
-from typing import List, Optional, Any
+from typing import List, Optional, Any, Dict, Tuple
 import asyncio
 import logging
-from typing import Dict
 
 # Import your meal search system
 from meal_search import EnhancedMealSearchManager, search_meals_for_user
@@ -19,10 +18,18 @@ logger = logging.getLogger(__name__)
 # Create router for meal endpoints
 meal_router = APIRouter(prefix="/api/meals", tags=["Meal Search"])
 
+# Define APIResponse class
+class APIResponse(BaseModel):
+    success: bool
+    data: Optional[Any] = None
+    message: Optional[str] = None
+    error: Optional[str] = None
+    approach: Optional[str] = None
+
 # Pydantic models for meal endpoints
 class MealSearchRequest(BaseModel):
     request: str = Field(..., min_length=1, max_length=500, description="User's meal request")
-    max_results: int = Field(default=8, ge=1, le=20, description="Maximum number of meals to return")
+    max_results: int = Field(default=16, ge=1, le=20, description="Maximum number of meals to return")
     include_grocery: bool = Field(default=True, description="Include grocery shopping integration")
     cuisine_filter: Optional[List[str]] = Field(default=None, description="Filter by specific cuisines")
     diet_filter: Optional[List[str]] = Field(default=None, description="Filter by dietary requirements")
@@ -45,6 +52,14 @@ class ShoppingListRequest(BaseModel):
 class MealDetailsRequest(BaseModel):
     meal_data: Dict[str, Any] = Field(..., description="Complete meal data from the meal card")
 
+class IngredientRequest(BaseModel):
+    ingredients: List[Dict[str, Any]] = Field(..., description="List of ingredients to analyze")
+
+# Dependency function (will be overridden in main.py)
+async def get_enhanced_grocery_mcp():
+    """Placeholder dependency - will be overridden in main.py"""
+    return None
+
 # Updated function definitions for meal search
 MEAL_SEARCH_FUNCTIONS = [
     {
@@ -56,7 +71,7 @@ MEAL_SEARCH_FUNCTIONS = [
                 "type": "object",
                 "properties": {
                     "user_request": {"type": "string", "description": "User's meal request (e.g., 'healthy dinner for 4 people')"},
-                    "max_results": {"type": "integer", "description": "Maximum number of meals to return", "default": 8},
+                    "max_results": {"type": "integer", "description": "Maximum number of meals to return", "default": 16},
                     "include_grocery": {"type": "boolean", "description": "Include grocery shopping integration", "default": True}
                 },
                 "required": ["user_request"]
@@ -115,11 +130,111 @@ MEAL_SEARCH_FUNCTIONS = [
     }
 ]
 
+# Cost analysis functions
+def analyze_store_costs(ingredient_results: List[Dict]) -> Dict[str, Any]:
+    """Analyze costs if shopping at individual stores"""
+    stores = ['dm', 'lidl', 'mercator', 'spar', 'tus']
+    store_analysis = {}
+    
+    for store in stores:
+        total_cost = 0.0
+        available_items = 0
+        missing_items = []
+        found_products = []
+        
+        for result in ingredient_results:
+            ingredient = result['ingredient']
+            search_results = result['search_result']
+            
+            # Find product in this specific store
+            store_product = None
+            for product in search_results:
+                if (product.get('store_name', '').lower() == store.lower() and 
+                    product.get('current_price') and 
+                    product.get('current_price') > 0):
+                    store_product = product
+                    break
+            
+            if store_product:
+                total_cost += store_product['current_price']
+                available_items += 1
+                found_products.append({
+                    'ingredient': ingredient.get('name', ingredient.get('original', '')),
+                    'product': store_product,
+                    'price': store_product['current_price']
+                })
+            else:
+                missing_items.append(ingredient.get('name', ingredient.get('original', '')))
+        
+        store_analysis[store] = {
+            'store_name': store.upper(),
+            'total_cost': round(total_cost, 2),
+            'available_items': available_items,
+            'missing_items': missing_items,
+            'found_products': found_products,
+            'completeness': round((available_items / len(ingredient_results)) * 100, 1) if ingredient_results else 0
+        }
+    
+    return store_analysis
+
+def analyze_combined_cheapest_costs(ingredient_results: List[Dict]) -> Dict[str, Any]:
+    """Analyze costs using cheapest option for each ingredient across all stores"""
+    total_cost = 0.0
+    available_items = 0
+    item_details = []
+    
+    for result in ingredient_results:
+        ingredient = result['ingredient']
+        search_results = result['search_result']
+        
+        if search_results:
+            # Find the cheapest product across all stores
+            valid_products = [
+                p for p in search_results 
+                if p.get('current_price') and p.get('current_price') > 0
+            ]
+            
+            if valid_products:
+                cheapest_product = min(valid_products, key=lambda x: x['current_price'])
+                total_cost += cheapest_product['current_price']
+                available_items += 1
+                
+                item_details.append({
+                    'ingredient': ingredient.get('name', ingredient.get('original', '')),
+                    'price': cheapest_product['current_price'],
+                    'store': cheapest_product.get('store_name', ''),
+                    'product': cheapest_product,
+                    'found': True
+                })
+            else:
+                item_details.append({
+                    'ingredient': ingredient.get('name', ingredient.get('original', '')),
+                    'price': None,
+                    'store': None,
+                    'product': None,
+                    'found': False
+                })
+        else:
+            item_details.append({
+                'ingredient': ingredient.get('name', ingredient.get('original', '')),
+                'price': None,
+                'store': None,
+                'product': None,
+                'found': False
+            })
+    
+    return {
+        'total_cost': round(total_cost, 2),
+        'available_items': available_items,
+        'item_details': item_details,
+        'completeness': round((available_items / len(ingredient_results)) * 100, 1) if ingredient_results else 0
+    }
+
 # Meal search endpoints
 @meal_router.post("/search")
 async def search_meals(
     request: MealSearchRequest,
-    grocery_mcp=Depends(lambda: None)  # You'll inject your grocery_mcp here
+    grocery_mcp=Depends(get_enhanced_grocery_mcp)
 ):
     """
     Search for meals based on user request with grocery integration
@@ -175,166 +290,101 @@ async def search_meals(
         logger.error(f"Meal search error: {str(e)}")
         raise HTTPException(status_code=500, detail=f"Meal search failed: {str(e)}")
 
-@meal_router.post("/plan")
-async def create_meal_plan(
-    request: MealPlanRequest,
-    grocery_mcp=Depends(lambda: None)
+@meal_router.post("/details/{meal_id}")
+async def get_meal_details(
+    meal_id: str,
+    request: MealDetailsRequest,
+    grocery_mcp=Depends(get_enhanced_grocery_mcp)
 ):
     """
-    Create a comprehensive meal plan for multiple days
+    Get detailed meal information with grocery integration for a selected meal
     """
     try:
-        logger.info(f"🗓️ Creating meal plan for {request.days} days, {request.people_count} people")
+        logger.info(f"🛒 Getting detailed info for meal: {meal_id}")
         
-        meal_plan = await _generate_meal_plan(request, grocery_mcp)
+        async with EnhancedMealSearchManager(grocery_mcp) as meal_manager:
+            result = await meal_manager.get_meal_details_with_grocery(
+                meal_id, 
+                request.meal_data
+            )
         
         return {
-            "success": True,
-            "data": meal_plan,
-            "message": f"Created {request.days}-day meal plan for {request.people_count} people"
+            "success": result["success"],
+            "data": result,
+            "message": result.get("message", "Meal details retrieved")
         }
     
     except Exception as e:
-        logger.error(f"Meal plan creation error: {str(e)}")
-        raise HTTPException(status_code=500, detail=f"Meal plan creation failed: {str(e)}")
+        logger.error(f"Meal details error: {str(e)}")
+        raise HTTPException(status_code=500, detail=f"Failed to get meal details: {str(e)}")
 
-@meal_router.post("/shopping-list")
-async def create_shopping_list(
-    request: ShoppingListRequest,
-    grocery_mcp=Depends(lambda: None)
+@meal_router.post("/cost-analysis")
+async def analyze_meal_costs(
+    request: IngredientRequest,
+    grocery_mcp=Depends(get_enhanced_grocery_mcp)
 ):
     """
-    Create optimized grocery shopping list from selected meals
+    Analyze grocery costs for meal ingredients across stores
     """
     try:
-        logger.info(f"🛒 Creating shopping list for {len(request.meal_ids)} meals")
+        logger.info(f"🛒 Analyzing costs for {len(request.ingredients)} ingredients")
         
-        shopping_list = await _create_optimized_shopping_list(request, grocery_mcp)
+        if not grocery_mcp:
+            raise HTTPException(status_code=500, detail="Grocery system not available")
         
-        return {
-            "success": True,
-            "data": shopping_list,
-            "message": f"Created shopping list for {len(request.meal_ids)} meals"
-        }
-    
-    except Exception as e:
-        logger.error(f"Shopping list creation error: {str(e)}")
-        raise HTTPException(status_code=500, detail=f"Shopping list creation failed: {str(e)}")
-
-@meal_router.get("/recommendations/{cuisine}")
-async def get_cuisine_recommendations(
-    cuisine: str,
-    limit: int = Query(default=6, ge=1, le=15),
-    dietary_filter: Optional[str] = Query(default=None),
-    grocery_mcp=Depends(lambda: None)
-):
-    """
-    Get meal recommendations for a specific cuisine
-    """
-    try:
-        # Build search request based on cuisine
-        search_request = f"{cuisine} cuisine"
-        if dietary_filter:
-            search_request += f" {dietary_filter}"
+        # Search for each ingredient in the database
+        ingredient_results = []
         
-        result = await search_meals_for_user(
-            user_request=search_request,
-            grocery_mcp=grocery_mcp,
-            max_results=limit
+        for ingredient in request.ingredients:
+            ingredient_name = ingredient.get('name', ingredient.get('original', ''))
+            if not ingredient_name:
+                continue
+                
+            try:
+                # Use the enhanced search with validation
+                search_result = await grocery_mcp.find_cheapest_product_with_intelligent_suggestions(
+                    product_name=ingredient_name
+                )
+                
+                ingredient_results.append({
+                    'ingredient': ingredient,
+                    'search_result': search_result.get('products', []) if search_result.get('success') else [],
+                    'found': search_result.get('success', False) and len(search_result.get('products', [])) > 0
+                })
+                
+            except Exception as e:
+                logger.warning(f"Error searching for ingredient '{ingredient_name}': {e}")
+                ingredient_results.append({
+                    'ingredient': ingredient,
+                    'search_result': [],
+                    'found': False
+                })
+        
+        # Analyze store-by-store costs
+        store_analysis = analyze_store_costs(ingredient_results)
+        
+        # Analyze combined cheapest costs
+        combined_analysis = analyze_combined_cheapest_costs(ingredient_results)
+        
+        return APIResponse(
+            success=True,
+            data={
+                "store_analysis": store_analysis,
+                "combined_analysis": combined_analysis,
+                "ingredient_details": ingredient_results,
+                "total_ingredients": len(request.ingredients),
+                "found_ingredients": len([r for r in ingredient_results if r['found']])
+            },
+            message=f"Analyzed costs for {len(ingredient_results)} ingredients across Slovenian stores"
         )
         
-        return {
-            "success": True,
-            "data": {
-                "cuisine": cuisine,
-                "meals": result.get("meals", []),
-                "recommendations": result.get("presentation", {}).get("recommendations", [])
-            },
-            "message": f"Found {len(result.get('meals', []))} {cuisine} meal recommendations"
-        }
-    
     except Exception as e:
-        logger.error(f"Cuisine recommendations error: {str(e)}")
-        raise HTTPException(status_code=500, detail=f"Failed to get {cuisine} recommendations: {str(e)}")
-
-@meal_router.get("/dietary/{diet_type}")
-async def get_dietary_meals(
-    diet_type: str,
-    limit: int = Query(default=8, ge=1, le=15),
-    meal_type: Optional[str] = Query(default=None, description="breakfast, lunch, dinner, snack"),
-    grocery_mcp=Depends(lambda: None)
-):
-    """
-    Get meals for specific dietary requirements
-    """
-    try:
-        # Build search request
-        search_request = f"{diet_type} meals"
-        if meal_type:
-            search_request = f"{diet_type} {meal_type}"
-        
-        result = await search_meals_for_user(
-            user_request=search_request,
-            grocery_mcp=grocery_mcp,
-            max_results=limit
+        logger.error(f"Cost analysis error: {str(e)}")
+        return APIResponse(
+            success=False,
+            error=str(e),
+            message="Failed to analyze meal costs"
         )
-        
-        return {
-            "success": True,
-            "data": {
-                "diet_type": diet_type,
-                "meal_type": meal_type,
-                "meals": result.get("meals", []),
-                "dietary_info": _extract_dietary_info(result.get("meals", []))
-            },
-            "message": f"Found {len(result.get('meals', []))} {diet_type} meals"
-        }
-    
-    except Exception as e:
-        logger.error(f"Dietary meals error: {str(e)}")
-        raise HTTPException(status_code=500, detail=f"Failed to get {diet_type} meals: {str(e)}")
-
-@meal_router.get("/quick/{max_minutes}")
-async def get_quick_meals(
-    max_minutes: int,
-    limit: int = Query(default=8, ge=1, le=15),
-    cuisine: Optional[str] = Query(default=None),
-    grocery_mcp=Depends(lambda: None)
-):
-    """
-    Get quick meals under specified time limit
-    """
-    try:
-        search_request = f"quick meals under {max_minutes} minutes"
-        if cuisine:
-            search_request += f" {cuisine} cuisine"
-        
-        result = await search_meals_for_user(
-            user_request=search_request,
-            grocery_mcp=grocery_mcp,
-            max_results=limit
-        )
-        
-        # Filter by time
-        quick_meals = []
-        for meal in result.get("meals", []):
-            total_time = getattr(meal, 'prep_time', 0) + getattr(meal, 'cook_time', 0)
-            if total_time <= max_minutes:
-                quick_meals.append(meal)
-        
-        return {
-            "success": True,
-            "data": {
-                "max_minutes": max_minutes,
-                "meals": quick_meals[:limit],
-                "time_breakdown": _analyze_cooking_times(quick_meals)
-            },
-            "message": f"Found {len(quick_meals)} meals under {max_minutes} minutes"
-        }
-    
-    except Exception as e:
-        logger.error(f"Quick meals error: {str(e)}")
-        raise HTTPException(status_code=500, detail=f"Failed to get quick meals: {str(e)}")
 
 # Helper functions
 async def _apply_meal_filters(
@@ -380,196 +430,35 @@ async def _apply_meal_filters(
     
     return filtered_meals
 
-async def _generate_meal_plan(request: MealPlanRequest, grocery_mcp) -> Dict[str, Any]:
-    """Generate a comprehensive meal plan"""
-    
-    meal_types = ["breakfast", "lunch", "dinner", "snack", "dessert"][:request.meals_per_day]
-    plan = {"days": [], "total_cost": 0.0, "shopping_list": [], "nutrition_summary": {}}
-    
-    for day in range(1, request.days + 1):
-        day_plan = {"day": day, "meals": [], "daily_cost": 0.0}
-        
-        for meal_type in meal_types:
-            # Build search request for this meal
-            search_request = f"{meal_type}"
-            if request.dietary_restrictions:
-                search_request += f" {' '.join(request.dietary_restrictions)}"
-            search_request += f" for {request.people_count} people"
-            
-            # Search for meal
+# Function to execute meal search functions
+async def execute_meal_function(function_name: str, arguments: dict, grocery_mcp) -> dict:
+    """Execute meal search functions"""
+    try:
+        if function_name == "search_meals_by_request":
             result = await search_meals_for_user(
-                user_request=search_request,
+                user_request=arguments["user_request"],
                 grocery_mcp=grocery_mcp,
-                max_results=3
+                max_results=arguments.get("max_results", 16)
             )
-            
-            if result["success"] and result["meals"]:
-                selected_meal = result["meals"][0]  # Take best match
-                
-                # Calculate cost for this meal
-                meal_cost = getattr(selected_meal, 'estimated_cost', 0) or 0
-                if request.budget_per_day and meal_cost > (request.budget_per_day / request.meals_per_day):
-                    # Try to find cheaper alternative
-                    for alternative in result["meals"][1:]:
-                        alt_cost = getattr(alternative, 'estimated_cost', 0) or 0
-                        if alt_cost <= (request.budget_per_day / request.meals_per_day):
-                            selected_meal = alternative
-                            meal_cost = alt_cost
-                            break
-                
-                day_plan["meals"].append({
-                    "type": meal_type,
-                    "meal": selected_meal,
-                    "cost": meal_cost
-                })
-                day_plan["daily_cost"] += meal_cost
+            return {"meal_search_result": result}
         
-        plan["days"].append(day_plan)
-        plan["total_cost"] += day_plan["daily_cost"]
-    
-    # Generate consolidated shopping list
-    plan["shopping_list"] = await _consolidate_shopping_list(plan["days"], request.people_count)
-    
-    # Calculate nutrition summary
-    plan["nutrition_summary"] = _calculate_nutrition_summary(plan["days"])
-    
-    return plan
-
-async def _create_optimized_shopping_list(request: ShoppingListRequest, grocery_mcp) -> Dict[str, Any]:
-    """Create optimized shopping list from selected meals"""
-    
-    # This would integrate with your grocery system to find best prices
-    # For now, return a simplified version
-    shopping_list = {
-        "items": [],
-        "total_cost": 0.0,
-        "stores": {},
-        "optimization_info": {
-            "total_items": 0,
-            "money_saved": 0.0,
-            "best_store_distribution": {}
-        }
-    }
-    
-    # Here you would:
-    # 1. Extract ingredients from all selected meals
-    # 2. Consolidate duplicate ingredients
-    # 3. Use grocery_mcp to find best prices for each ingredient
-    # 4. Optimize store distribution for lowest total cost
-    # 5. Calculate quantities for people_count
-    
-    return shopping_list
-
-async def _consolidate_shopping_list(days: List[Dict], people_count: int) -> List[Dict]:
-    """Consolidate ingredients from multiple days into optimized shopping list"""
-    
-    ingredient_map = {}
-    
-    for day in days:
-        for meal_info in day["meals"]:
-            meal = meal_info["meal"]
-            shopping_list = getattr(meal, 'grocery_shopping_list', [])
-            
-            for item in shopping_list:
-                ingredient_name = item.get("ingredient", "")
-                if ingredient_name in ingredient_map:
-                    # Combine quantities
-                    ingredient_map[ingredient_name]["quantity"] += 1
-                    ingredient_map[ingredient_name]["total_cost"] += item.get("estimated_cost", 0)
-                else:
-                    ingredient_map[ingredient_name] = {
-                        "ingredient": ingredient_name,
-                        "quantity": 1,
-                        "total_cost": item.get("estimated_cost", 0),
-                        "product_info": item.get("product", {})
-                    }
-    
-    return list(ingredient_map.values())
-
-def _calculate_nutrition_summary(days: List[Dict]) -> Dict[str, Any]:
-    """Calculate nutrition summary for meal plan"""
-    
-    total_nutrition = {"calories": 0, "protein": 0, "fat": 0, "carbs": 0}
-    meal_count = 0
-    
-    for day in days:
-        for meal_info in day["meals"]:
-            meal = meal_info["meal"]
-            nutrition = getattr(meal, 'nutrition', {})
-            
-            if nutrition:
-                total_nutrition["calories"] += nutrition.get("calories", 0)
-                total_nutrition["protein"] += float(str(nutrition.get("protein", 0)).replace("g", ""))
-                total_nutrition["fat"] += float(str(nutrition.get("fat", 0)).replace("g", ""))
-                total_nutrition["carbs"] += float(str(nutrition.get("carbs", 0)).replace("g", ""))
-                meal_count += 1
-    
-    if meal_count > 0:
-        return {
-            "total": total_nutrition,
-            "daily_average": {
-                "calories": total_nutrition["calories"] / len(days),
-                "protein": total_nutrition["protein"] / len(days),
-                "fat": total_nutrition["fat"] / len(days),
-                "carbs": total_nutrition["carbs"] / len(days)
-            },
-            "meal_count": meal_count
-        }
-    
-    return {"total": total_nutrition, "daily_average": {}, "meal_count": 0}
-
-def _extract_dietary_info(meals: List) -> Dict[str, Any]:
-    """Extract dietary information from meals"""
-    
-    all_diets = set()
-    all_allergens = set()
-    
-    for meal in meals:
-        diet_labels = getattr(meal, 'diet_labels', [])
-        allergen_info = getattr(meal, 'allergen_info', [])
+        elif function_name == "get_meal_details_with_grocery":
+            # Handle meal details request
+            async with EnhancedMealSearchManager(grocery_mcp) as meal_manager:
+                result = await meal_manager.get_meal_details_with_grocery(
+                    arguments["meal_id"], 
+                    arguments["meal_data"]
+                )
+            return {"meal_details_result": result}
         
-        all_diets.update(diet_labels)
-        all_allergens.update(allergen_info)
+        else:
+            raise ValueError(f"Unknown meal function: {function_name}")
     
-    return {
-        "common_diets": list(all_diets),
-        "allergens_present": list(all_allergens),
-        "diet_distribution": _calculate_diet_distribution(meals)
-    }
+    except Exception as e:
+        logger.error(f"Error executing meal function {function_name}: {str(e)}")
+        raise HTTPException(status_code=500, detail=f"Meal function execution failed: {str(e)}")
 
-def _calculate_diet_distribution(meals: List) -> Dict[str, int]:
-    """Calculate distribution of dietary labels across meals"""
-    
-    diet_count = {}
-    
-    for meal in meals:
-        diet_labels = getattr(meal, 'diet_labels', [])
-        for diet in diet_labels:
-            diet_count[diet] = diet_count.get(diet, 0) + 1
-    
-    return diet_count
-
-def _analyze_cooking_times(meals: List) -> Dict[str, Any]:
-    """Analyze cooking time distribution"""
-    
-    times = []
-    for meal in meals:
-        total_time = getattr(meal, 'prep_time', 0) + getattr(meal, 'cook_time', 0)
-        times.append(total_time)
-    
-    if not times:
-        return {}
-    
-    return {
-        "average_time": sum(times) / len(times),
-        "min_time": min(times),
-        "max_time": max(times),
-        "quick_meals": len([t for t in times if t <= 15]),
-        "medium_meals": len([t for t in times if 15 < t <= 45]),
-        "long_meals": len([t for t in times if t > 45])
-    }
-
-# Updated system message to include meal search capabilities
+# Enhanced system message
 ENHANCED_SYSTEM_MESSAGE_WITH_MEALS = """You are an advanced AI grocery shopping assistant for Slovenia with revolutionary think-first approach AND comprehensive meal search capabilities.
 
 🧠 **Your Think-First Approach:**
@@ -595,120 +484,18 @@ User: "Find healthy Italian dinner for 4 people"
 4. Search Slovenian grocery database for each ingredient
 5. Provide complete meal with ingredient prices from DM, Lidl, Mercator, SPAR, TUS
 
-**Meal Search Capabilities:**
-✅ **Multiple Recipe APIs** - Spoonacular, Edamam, TheMealDB
-✅ **Natural Language Processing** - Understand complex meal requests
-✅ **Dietary Filtering** - Vegetarian, vegan, keto, gluten-free, etc.
-✅ **Cuisine Variety** - Italian, Asian, Mediterranean, Slovenian, etc.
-✅ **Time-based Search** - Quick meals, elaborate dinners, meal prep
-✅ **Grocery Integration** - Real Slovenian prices for all ingredients
-✅ **Shopping List Generation** - Optimized across stores
-✅ **Meal Planning** - Multi-day plans with budget optimization
-
-**How to Help Users with Meals:**
-1. **Always use meal search functions** for meal-related requests
-2. **Explain the comprehensive approach** - from recipe APIs to grocery prices
-3. **Provide complete solutions** - meal + grocery shopping + cost estimation
-4. **Show variety and options** with different cuisines and dietary needs
-5. **Include practical information** - cooking times, difficulty, nutrition
-
-**Database Access for Groceries:**
-- 34,790+ products from DM, Mercator, SPAR, TUS, LIDL
-- AI-enhanced with health scores, nutrition grades, value ratings
-- Think-first approach ensures comprehensive coverage
-- Full integration with meal ingredient requirements
-
 The think-first approach + meal search ensures you provide the most complete meal and grocery recommendations possible, combining international recipe knowledge with local Slovenian pricing data.
 
 Respond in Slovenian when appropriate, and always highlight when the meal search + grocery integration provided comprehensive solutions.
 """
-
-@meal_router.post("/details/{meal_id}")  # ← Changed from GET to POST
-async def get_meal_details(
-    meal_id: str,
-    request: MealDetailsRequest,  # ← Use the Pydantic model
-    grocery_mcp=Depends(lambda: None)
-):
-    """
-    Get detailed meal information with grocery integration for a selected meal
-    """
-    try:
-        logger.info(f"🛒 Getting detailed info for meal: {meal_id}")
-        
-        async with EnhancedMealSearchManager(grocery_mcp) as meal_manager:
-            result = await meal_manager.get_meal_details_with_grocery(
-                meal_id, 
-                request.meal_data  # ← Access meal_data from the request object
-            )
-        
-        return {
-            "success": result["success"],
-            "data": result,
-            "message": result.get("message", "Meal details retrieved")
-        }
-    
-    except Exception as e:
-        logger.error(f"Meal details error: {str(e)}")
-        raise HTTPException(status_code=500, detail=f"Failed to get meal details: {str(e)}")
-
-# Function to execute meal search functions
-async def execute_meal_function(function_name: str, arguments: dict, grocery_mcp) -> dict:
-    """Execute meal search functions"""
-    try:
-        if function_name == "search_meals_by_request":
-            result = await search_meals_for_user(
-                user_request=arguments["user_request"],
-                grocery_mcp=grocery_mcp,
-                max_results=arguments.get("max_results", 8)
-            )
-            return {"meal_search_result": result}
-        
-        elif function_name == "get_meal_details_with_grocery":
-            # NEW: Handle meal details request
-            async with EnhancedMealSearchManager(grocery_mcp) as meal_manager:
-                result = await meal_manager.get_meal_details_with_grocery(
-                    arguments["meal_id"], 
-                    arguments["meal_data"]
-                )
-            return {"meal_details_result": result}
-        
-        elif function_name == "create_meal_plan":
-            request = MealPlanRequest(**arguments)
-            result = await _generate_meal_plan(request, grocery_mcp)
-            return {"meal_plan_result": result}
-        
-        elif function_name == "get_meal_recommendations_by_ingredients":
-            # Create search request based on available ingredients
-            ingredients = arguments["available_ingredients"]
-            search_request = f"meals using {', '.join(ingredients[:3])}"
-            
-            result = await search_meals_for_user(
-                user_request=search_request,
-                grocery_mcp=grocery_mcp,
-                max_results=6
-            )
-            return {"ingredient_based_meals": result}
-        
-        elif function_name == "create_grocery_shopping_list_from_meals":
-            request = ShoppingListRequest(
-                meal_ids=arguments["meal_selections"],
-                people_count=arguments.get("people_count", 2),
-                store_preference=arguments.get("store_preference")
-            )
-            result = await _create_optimized_shopping_list(request, grocery_mcp)
-            return {"shopping_list_result": result}
-        
-        else:
-            raise ValueError(f"Unknown meal function: {function_name}")
-    
-    except Exception as e:
-        logger.error(f"Error executing meal function {function_name}: {str(e)}")
-        raise HTTPException(status_code=500, detail=f"Meal function execution failed: {str(e)}")
 
 # Export the router and functions to integrate with your main FastAPI app
 __all__ = [
     "meal_router", 
     "execute_meal_function", 
     "MEAL_SEARCH_FUNCTIONS", 
-    "ENHANCED_SYSTEM_MESSAGE_WITH_MEALS"
+    "ENHANCED_SYSTEM_MESSAGE_WITH_MEALS",
+    "analyze_store_costs",
+    "analyze_combined_cheapest_costs",
+    "APIResponse"
 ]

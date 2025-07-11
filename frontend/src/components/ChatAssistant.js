@@ -1,4 +1,4 @@
-// components/ChatAssistant.js - Updated with inline recipe support
+// components/ChatAssistant.js - Updated with more meal results and enhanced grocery integration
 import React, { useState, useRef, useEffect } from 'react';
 import ApiService from '../services/api';
 import MealCards, { MealDetailView } from './MealCards';
@@ -30,12 +30,14 @@ const ChatAssistant = () => {
     "Find Italian lunch recipes",
     "Healthy breakfast ideas", 
     "Quick dinner for 2 people",
-    "Vegetarian meal options"
+    "Vegetarian meal options",
+    "Budget-friendly recipes",
+    "High protein meals"
   ];
 
   // Check if a message contains meal search results
   const containsMealSearch = (content) => {
-    const mealKeywords = ['recipe', 'meal', 'lunch', 'dinner', 'breakfast', 'cook', 'ingredient'];
+    const mealKeywords = ['recipe', 'meal', 'lunch', 'dinner', 'breakfast', 'cook', 'ingredient', 'food'];
     return mealKeywords.some(keyword => content.toLowerCase().includes(keyword));
   };
 
@@ -75,17 +77,22 @@ const ChatAssistant = () => {
     try {
       // Check if this is likely a meal search request
       if (containsMealSearch(message)) {
-        // Try meal search first
+        // Try meal search first with more results
         try {
-          const mealResponse = await ApiService.searchMeals(message);
+          const mealResponse = await ApiService.searchMeals(message, 16); // Increased to 16 results
           
           if (mealResponse.success && mealResponse.data.meals?.length > 0) {
             const botMessage = { 
               role: 'assistant', 
-              content: mealResponse.data.presentation?.summary || `Found ${mealResponse.data.meals.length} meal options for you!`,
+              content: mealResponse.data.presentation?.summary || `Found ${mealResponse.data.meals.length} meal options for you! Here are recipes with ingredients you can cook:`,
               timestamp: new Date(),
               meals: mealResponse.data.meals,
-              isMealSearch: true
+              isMealSearch: true,
+              searchStats: {
+                total_found: mealResponse.data.total_found || 0,
+                apis_used: mealResponse.data.apis_used || [],
+                filtered_count: mealResponse.data.meals.length
+              }
             };
             setMessages(prev => [...prev, botMessage]);
             setLoading(false);
@@ -127,29 +134,11 @@ const ChatAssistant = () => {
     }
   };
 
-  // NEW: Handle when user clicks "Get Grocery List" button in recipe display
+  // UPDATED: Handle when user clicks "Find Grocery Prices" button in recipe display
   const handleGroceryRequest = async (meal) => {
-    setSelectedMeal(meal);
-    setLoadingGrocery(true);
-    
-    try {
-      // Get detailed grocery information for selected meal
-      const response = await ApiService.getMealDetails(meal.id, meal);
-      
-      if (response.success) {
-        setMealDetails(response.data);
-        setShowGroceryDetails(true);
-      } else {
-        console.error('Failed to get meal details:', response.error);
-        // Show error message to user
-        alert('Failed to get grocery details. Please try again.');
-      }
-    } catch (error) {
-      console.error('Error getting meal details:', error);
-      alert('Failed to get grocery details. Please try again.');
-    } finally {
-      setLoadingGrocery(false);
-    }
+    // This is now handled directly in MealCards component
+    // We keep this function for compatibility but it's not used
+    console.log('Grocery request handled by MealCards component');
   };
 
   const handleBackToRecipe = () => {
@@ -181,25 +170,25 @@ const ChatAssistant = () => {
       );
     }
 
-    // Show meal cards with inline recipe display
+    // Show meal cards with inline recipe display and enhanced grocery analysis
     if (msg.isMealSearch && msg.meals) {
       return (
         <div className="meal-search-result">
           <div className="message-content">
             {msg.content}
+            {msg.searchStats && (
+              <div className="search-stats">
+                <small>
+                  📊 Found {msg.searchStats.total_found} recipes from {msg.searchStats.apis_used?.join(', ')} • 
+                  Showing top {msg.searchStats.filtered_count} results
+                </small>
+              </div>
+            )}
           </div>
           <MealCards 
             meals={msg.meals} 
-            onMealSelect={handleGroceryRequest} // This now triggers grocery request
+            onMealSelect={handleGroceryRequest} // For compatibility
           />
-          
-          {/* Loading overlay for grocery details */}
-          {loadingGrocery && (
-            <div className="loading-overlay">
-              <div className="loading-spinner"></div>
-              <p>Getting grocery details...</p>
-            </div>
-          )}
         </div>
       );
     }
@@ -230,7 +219,7 @@ const ChatAssistant = () => {
           <div className="welcome-message">
             <div className="welcome-avatar">🛒</div>
             <h3>Slovenian Grocery & Meal Assistant</h3>
-            <p>Find the best prices and discover delicious recipes with complete cooking instructions</p>
+            <p>Find the best prices and discover delicious recipes with complete cooking instructions and store-by-store grocery price analysis</p>
             
             <div className="quick-questions">
               <h4>Try asking:</h4>

@@ -6,7 +6,7 @@ Final Fixed Meal Search Integration - Resolves all API issues
 import asyncio
 import json
 import logging
-from typing import Dict, List, Any, Optional
+from typing import Dict, List, Any, Optional, Tuple
 import aiohttp
 import os
 from dataclasses import dataclass
@@ -112,48 +112,48 @@ class EnhancedMealSearchManager:
     async def search_meals_by_request(
         self, 
         user_request: str, 
-        max_results: int = 10,
-        include_grocery_integration: bool = False  # Changed default to False
+        max_results: int = 16,  # Increased default from 10 to 16
+        include_grocery_integration: bool = False
     ) -> Dict[str, Any]:
         """
         Main function to search meals - returns meal cards without grocery integration by default
         """
         
-        logger.info(f"🍽️ Searching meals for request: '{user_request}'")
+        logger.info(f"🍽️ Searching meals for request: '{user_request}' (max: {max_results})")
         
         # Step 1: Parse user request with AI and translate to English
         request_analysis = await self._analyze_user_meal_request(user_request)
         
-        # Step 2: Search meals across APIs
+        # Step 2: Search meals across APIs with increased limits
         all_meals = []
         
-        # Search Spoonacular
+        # Search Spoonacular with more results
         if self.apis["spoonacular"]["enabled"]:
             try:
-                spoonacular_meals = await self._search_spoonacular_meals(request_analysis, max_results//2)
+                spoonacular_meals = await self._search_spoonacular_meals(request_analysis, max_results//2 + 2)  # Increased allocation
                 all_meals.extend(spoonacular_meals)
                 logger.info(f"🥄 Spoonacular found {len(spoonacular_meals)} meals")
             except Exception as e:
                 logger.error(f"Spoonacular search failed: {e}")
         
-        # Search Edamam
+        # Search Edamam with more results
         if self.apis["edamam"]["enabled"]:
             try:
-                edamam_meals = await self._search_edamam_meals(request_analysis, max_results//2)
+                edamam_meals = await self._search_edamam_meals(request_analysis, max_results//2 + 2)  # Increased allocation
                 all_meals.extend(edamam_meals)
                 logger.info(f"🍳 Edamam found {len(edamam_meals)} meals")
             except Exception as e:
                 logger.error(f"Edamam search failed: {e}")
         
-        # Search TheMealDB (free backup)
+        # Search TheMealDB with more results
         try:
-            themealdb_meals = await self._search_themealdb_meals(request_analysis, max_results//3)
+            themealdb_meals = await self._search_themealdb_meals(request_analysis, max_results//3 + 2)  # Increased allocation
             all_meals.extend(themealdb_meals)
             logger.info(f"🥘 TheMealDB found {len(themealdb_meals)} meals")
         except Exception as e:
             logger.error(f"TheMealDB search failed: {e}")
         
-        # Step 3: Filter and rank meals
+        # Step 3: Filter and rank meals with more aggressive filtering for better results
         filtered_meals = await self._filter_and_rank_meals(all_meals, request_analysis, max_results)
         
         # Step 4: ONLY do grocery integration if specifically requested
@@ -164,7 +164,7 @@ class EnhancedMealSearchManager:
         else:
             logger.info(f"🎴 Returning {len(filtered_meals)} meal cards without grocery integration")
         
-        # Step 5: Generate presentation
+        # Step 5: Generate presentation with enhanced info
         presentation = await self._create_meal_presentation(filtered_meals, request_analysis, user_request)
         
         # Convert MealResult objects to dictionaries for JSON serialization
@@ -178,8 +178,15 @@ class EnhancedMealSearchManager:
             "total_found": len(all_meals),
             "filtered_count": len(filtered_meals),
             "apis_used": [api for api, config in self.apis.items() if config["enabled"]],
-            "grocery_integration": include_grocery_integration
+            "grocery_integration": include_grocery_integration,
+            "search_quality": {
+                "diverse_sources": len([api for api, config in self.apis.items() if config["enabled"]]),
+                "result_coverage": min(100, (len(filtered_meals) / max_results) * 100),
+                "api_success_rate": len([api for api, config in self.apis.items() if config["enabled"]]) / 3 * 100
+            }
         }
+
+
 
     async def get_meal_details_with_grocery(
         self, 
@@ -738,6 +745,124 @@ class EnhancedMealSearchManager:
             allergen_info=recipe.get("cautions", []) or []
         )
     
+
+    async def _calculate_enhanced_meal_score(self, meal: MealResult, request_analysis: Dict) -> float:
+        """Enhanced scoring algorithm for better meal ranking"""
+        
+        score = 0.0
+        
+        # Base score for having key information
+        if meal.title:
+            score += 1.0
+        if meal.ingredients and len(meal.ingredients) > 0:
+            score += 1.0
+        if meal.image_url:
+            score += 0.5
+        
+        # Time preferences - with null safety and better scoring
+        prep_time = meal.prep_time or 0
+        cook_time = meal.cook_time or 0
+        total_time = prep_time + cook_time
+        max_time = request_analysis.get("max_cook_time") or 60
+        
+        if total_time <= max_time:
+            score += 3.0  # Higher weight for time match
+        elif total_time <= max_time * 1.2:
+            score += 2.0
+        elif total_time <= max_time * 1.5:
+            score += 1.0
+        
+        # Dietary restrictions match - higher weight
+        meal_diets = [d.lower() for d in (meal.diet_labels or [])]
+        user_diets = [d.lower() for d in request_analysis.get("dietary_restrictions", [])]
+        for diet in user_diets:
+            if any(diet in meal_diet for meal_diet in meal_diets):
+                score += 3.0  # High weight for diet compatibility
+        
+        # Cuisine preference - enhanced matching
+        user_cuisines = [c.lower() for c in request_analysis.get("cuisine_types", [])]
+        meal_cuisine = (meal.cuisine_type or "").lower()
+        for cuisine in user_cuisines:
+            if cuisine in meal_cuisine or meal_cuisine in cuisine:
+                score += 2.5  # Good weight for cuisine match
+        
+        # Ingredient preferences - enhanced logic
+        meal_ingredients = []
+        if meal.ingredients:
+            for ing in meal.ingredients:
+                if isinstance(ing, dict) and "name" in ing and ing["name"]:
+                    meal_ingredients.append(ing["name"].lower())
+        
+        # Bonus for included ingredients
+        for ingredient in request_analysis.get("included_ingredients", []):
+            if ingredient and any(ingredient.lower() in meal_ing for meal_ing in meal_ingredients):
+                score += 1.5
+        
+        # Penalty for excluded ingredients
+        for ingredient in request_analysis.get("excluded_ingredients", []):
+            if ingredient and any(ingredient.lower() in meal_ing for meal_ing in meal_ingredients):
+                score -= 3.0  # Strong penalty for excluded ingredients
+        
+        # Servings match - enhanced scoring
+        target_servings = request_analysis.get("servings") or 2
+        meal_servings = meal.servings or 2
+        servings_diff = abs(meal_servings - target_servings)
+        if servings_diff == 0:
+            score += 1.5
+        elif servings_diff <= 2:
+            score += 1.0
+        elif servings_diff <= 4:
+            score += 0.5
+        
+        # Bonus for complete recipes (have instructions)
+        if meal.instructions and len(meal.instructions) > 0:
+            score += 1.0
+        
+        # Bonus for nutritional information
+        if meal.nutrition and len(meal.nutrition) > 0:
+            score += 0.5
+        
+        # Health focus bonus
+        health_focus = request_analysis.get("health_focus", "").lower()
+        if health_focus == "healthy":
+            # Look for healthy indicators
+            healthy_keywords = ["vegetable", "fruit", "lean", "grilled", "baked", "steamed"]
+            meal_text = f"{meal.title} {' '.join([ing.get('name', '') for ing in (meal.ingredients or [])])}"
+            if any(keyword in meal_text.lower() for keyword in healthy_keywords):
+                score += 1.5
+        
+        return max(0.0, score)  # Ensure non-negative score
+
+
+    def _ensure_cuisine_diversity(self, scored_meals: List[Tuple[float, MealResult]], max_results: int) -> List[MealResult]:
+        """Ensure diversity in cuisine types for better user experience"""
+        
+        selected_meals = []
+        cuisine_counts = {}
+        max_per_cuisine = max(2, max_results // 4)  # Max 2-4 meals per cuisine type
+        
+        for score, meal in scored_meals:
+            if len(selected_meals) >= max_results:
+                break
+                
+            cuisine = (meal.cuisine_type or 'international').lower()
+            current_count = cuisine_counts.get(cuisine, 0)
+            
+            # Add meal if we haven't reached the limit for this cuisine
+            if current_count < max_per_cuisine:
+                selected_meals.append(meal)
+                cuisine_counts[cuisine] = current_count + 1
+        
+        # If we still need more meals and have room, add remaining high-scoring meals
+        if len(selected_meals) < max_results:
+            for score, meal in scored_meals:
+                if len(selected_meals) >= max_results:
+                    break
+                if meal not in selected_meals:
+                    selected_meals.append(meal)
+        
+        return selected_meals
+
     async def _parse_themealdb_recipe(self, meal: Dict) -> MealResult:
         """Parse TheMealDB recipe data with comprehensive null checks"""
         
@@ -803,7 +928,7 @@ class EnhancedMealSearchManager:
         request_analysis: Dict, 
         max_results: int
     ) -> List[MealResult]:
-        """Filter and rank meals based on user preferences with null safety"""
+        """Filter and rank meals based on user preferences with improved algorithm"""
         
         # FIRST: Filter out None meals
         valid_meals = [meal for meal in meals if meal is not None]
@@ -811,7 +936,7 @@ class EnhancedMealSearchManager:
         if not valid_meals:
             return []
         
-        # Remove duplicates based on title similarity
+        # Remove duplicates based on title similarity with more aggressive deduplication
         unique_meals = []
         seen_titles = set()
         
@@ -820,9 +945,9 @@ class EnhancedMealSearchManager:
                 continue
                 
             title_lower = meal.title.lower()
-            # Simple duplicate detection
+            # More aggressive duplicate detection
             is_duplicate = any(
-                self._calculate_similarity(title_lower, seen_title) > 0.8 
+                self._calculate_similarity(title_lower, seen_title) > 0.7  # Lowered threshold for better variety
                 for seen_title in seen_titles
             )
             
@@ -830,11 +955,11 @@ class EnhancedMealSearchManager:
                 unique_meals.append(meal)
                 seen_titles.add(title_lower)
         
-        # Score meals based on user preferences
+        # Score meals based on user preferences with enhanced scoring
         scored_meals = []
         for meal in unique_meals:
             try:
-                score = await self._calculate_meal_score(meal, request_analysis)
+                score = await self._calculate_enhanced_meal_score(meal, request_analysis)
                 scored_meals.append((score, meal))
             except Exception as e:
                 logger.warning(f"Error scoring meal '{meal.title}': {e}")
@@ -843,8 +968,12 @@ class EnhancedMealSearchManager:
         
         # Sort by score and return top results
         scored_meals.sort(key=lambda x: x[0], reverse=True)
-        return [meal for score, meal in scored_meals[:max_results]]
-    
+        
+        # Ensure diverse results by limiting similar cuisine types
+        diverse_meals = self._ensure_cuisine_diversity(scored_meals, max_results)
+        
+        return diverse_meals
+        
     def _calculate_similarity(self, text1: str, text2: str) -> float:
         """Simple text similarity calculation"""
         words1 = set(text1.split())
