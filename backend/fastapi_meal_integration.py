@@ -42,6 +42,9 @@ class ShoppingListRequest(BaseModel):
     people_count: int = Field(default=2, ge=1, le=10, description="Number of people")
     store_preference: Optional[str] = Field(default=None, description="Preferred store")
 
+class MealDetailsRequest(BaseModel):
+    meal_data: Dict[str, Any] = Field(..., description="Complete meal data from the meal card")
+
 # Updated function definitions for meal search
 MEAL_SEARCH_FUNCTIONS = [
     {
@@ -619,14 +622,11 @@ The think-first approach + meal search ensures you provide the most complete mea
 
 Respond in Slovenian when appropriate, and always highlight when the meal search + grocery integration provided comprehensive solutions.
 """
-class MealDetailsRequest(BaseModel):
-    meal_data: Dict[str, Any] = Field(..., description="Complete meal data from the meal card")
 
-
-@meal_router.get("/details/{meal_id}")
+@meal_router.post("/details/{meal_id}")  # ← Changed from GET to POST
 async def get_meal_details(
     meal_id: str,
-    meal_data: dict,  # Passed as JSON body
+    request: MealDetailsRequest,  # ← Use the Pydantic model
     grocery_mcp=Depends(lambda: None)
 ):
     """
@@ -636,7 +636,10 @@ async def get_meal_details(
         logger.info(f"🛒 Getting detailed info for meal: {meal_id}")
         
         async with EnhancedMealSearchManager(grocery_mcp) as meal_manager:
-            result = await meal_manager.get_meal_details_with_grocery(meal_id, meal_data)
+            result = await meal_manager.get_meal_details_with_grocery(
+                meal_id, 
+                request.meal_data  # ← Access meal_data from the request object
+            )
         
         return {
             "success": result["success"],
@@ -647,7 +650,6 @@ async def get_meal_details(
     except Exception as e:
         logger.error(f"Meal details error: {str(e)}")
         raise HTTPException(status_code=500, detail=f"Failed to get meal details: {str(e)}")
-
 
 # Function to execute meal search functions
 async def execute_meal_function(function_name: str, arguments: dict, grocery_mcp) -> dict:

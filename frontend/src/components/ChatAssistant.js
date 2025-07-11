@@ -1,4 +1,4 @@
-// components/ChatAssistant.js - Updated with meal cards support
+// components/ChatAssistant.js - Updated with inline recipe support
 import React, { useState, useRef, useEffect } from 'react';
 import ApiService from '../services/api';
 import MealCards, { MealDetailView } from './MealCards';
@@ -9,7 +9,8 @@ const ChatAssistant = () => {
   const [loading, setLoading] = useState(false);
   const [selectedMeal, setSelectedMeal] = useState(null);
   const [mealDetails, setMealDetails] = useState(null);
-  const [showMealDetail, setShowMealDetail] = useState(false);
+  const [showGroceryDetails, setShowGroceryDetails] = useState(false);
+  const [loadingGrocery, setLoadingGrocery] = useState(false);
   const messagesEndRef = useRef(null);
   const inputRef = useRef(null);
 
@@ -19,7 +20,7 @@ const ChatAssistant = () => {
 
   useEffect(() => {
     scrollToBottom();
-  }, [messages]);
+  }, [messages, showGroceryDetails]);
 
   useEffect(() => {
     inputRef.current?.focus();
@@ -126,16 +127,35 @@ const ChatAssistant = () => {
     }
   };
 
-  const handleMealSelect = (meal, details) => {
+  // NEW: Handle when user clicks "Get Grocery List" button in recipe display
+  const handleGroceryRequest = async (meal) => {
     setSelectedMeal(meal);
-    setMealDetails(details);
-    setShowMealDetail(true);
+    setLoadingGrocery(true);
+    
+    try {
+      // Get detailed grocery information for selected meal
+      const response = await ApiService.getMealDetails(meal.id, meal);
+      
+      if (response.success) {
+        setMealDetails(response.data);
+        setShowGroceryDetails(true);
+      } else {
+        console.error('Failed to get meal details:', response.error);
+        // Show error message to user
+        alert('Failed to get grocery details. Please try again.');
+      }
+    } catch (error) {
+      console.error('Error getting meal details:', error);
+      alert('Failed to get grocery details. Please try again.');
+    } finally {
+      setLoadingGrocery(false);
+    }
   };
 
-  const handleBackToMeals = () => {
-    setShowMealDetail(false);
-    setSelectedMeal(null);
+  const handleBackToRecipe = () => {
+    setShowGroceryDetails(false);
     setMealDetails(null);
+    // Keep selectedMeal so recipe stays visible
   };
 
   const handleKeyPress = (e) => {
@@ -150,18 +170,18 @@ const ChatAssistant = () => {
   };
 
   const renderMessageContent = (msg) => {
-    // Show meal detail view if selected
-    if (showMealDetail && selectedMeal && mealDetails) {
+    // Show grocery detail view if selected
+    if (showGroceryDetails && selectedMeal && mealDetails) {
       return (
         <MealDetailView 
           meal={selectedMeal}
           groceryDetails={mealDetails.grocery_details}
-          onBack={handleBackToMeals}
+          onBack={handleBackToRecipe}
         />
       );
     }
 
-    // Show meal cards
+    // Show meal cards with inline recipe display
     if (msg.isMealSearch && msg.meals) {
       return (
         <div className="meal-search-result">
@@ -170,8 +190,16 @@ const ChatAssistant = () => {
           </div>
           <MealCards 
             meals={msg.meals} 
-            onMealSelect={handleMealSelect}
+            onMealSelect={handleGroceryRequest} // This now triggers grocery request
           />
+          
+          {/* Loading overlay for grocery details */}
+          {loadingGrocery && (
+            <div className="loading-overlay">
+              <div className="loading-spinner"></div>
+              <p>Getting grocery details...</p>
+            </div>
+          )}
         </div>
       );
     }
@@ -198,11 +226,11 @@ const ChatAssistant = () => {
   return (
     <div className="chat-container">
       <div className="chat-messages">
-        {messages.length === 0 && !showMealDetail && (
+        {messages.length === 0 && !showGroceryDetails && (
           <div className="welcome-message">
             <div className="welcome-avatar">🛒</div>
             <h3>Slovenian Grocery & Meal Assistant</h3>
-            <p>Find the best prices and discover delicious recipes with real grocery costs</p>
+            <p>Find the best prices and discover delicious recipes with complete cooking instructions</p>
             
             <div className="quick-questions">
               <h4>Try asking:</h4>
@@ -221,9 +249,9 @@ const ChatAssistant = () => {
           </div>
         )}
         
-        {!showMealDetail && messages.map((msg, index) => (
+        {!showGroceryDetails && messages.map((msg, index) => (
           <div key={index} className={`message ${msg.role} ${msg.error ? 'error' : ''}`}>
-            <div className="message-bubble">
+            <div className={`message-bubble ${msg.isMealSearch ? 'full-width' : ''}`}>
               {renderMessageContent(msg)}
               {msg.timestamp && (
                 <div className="message-time">
@@ -237,11 +265,12 @@ const ChatAssistant = () => {
           </div>
         ))}
 
-        {showMealDetail && (
+        {showGroceryDetails && (
           <div className="message assistant">
             <div className="message-bubble full-width">
               {renderMessageContent({ isMealSearch: false })}
             </div>
+            <div className="message-avatar">🛒</div>
           </div>
         )}
         
@@ -256,12 +285,13 @@ const ChatAssistant = () => {
                 </div>
               </div>
             </div>
+            <div className="message-avatar">🛒</div>
           </div>
         )}
         <div ref={messagesEndRef} />
       </div>
       
-      {!showMealDetail && (
+      {!showGroceryDetails && (
         <div className="chat-input">
           <div className="input-container">
             <input

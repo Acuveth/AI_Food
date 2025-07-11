@@ -1,31 +1,26 @@
-// components/MealCards.js
+// components/MealCards.js - Enhanced with inline recipe display
 import React, { useState } from 'react';
-import ApiService from '../services/api';
 
 const MealCards = ({ meals, onMealSelect }) => {
   const [selectedMeal, setSelectedMeal] = useState(null);
-  const [loadingDetails, setLoadingDetails] = useState(false);
-  const [mealDetails, setMealDetails] = useState(null);
+  const [showRecipe, setShowRecipe] = useState(false);
 
   const handleMealClick = async (meal) => {
     setSelectedMeal(meal);
-    setLoadingDetails(true);
+    setShowRecipe(true);
     
-    try {
-      // Get detailed grocery information for selected meal
-      const response = await ApiService.getMealDetails(meal.id, meal);
-      
-      if (response.success) {
-        setMealDetails(response.data);
-        onMealSelect(meal, response.data);
-      } else {
-        console.error('Failed to get meal details:', response.error);
+    // Scroll to recipe section
+    setTimeout(() => {
+      const recipeElement = document.getElementById('recipe-display');
+      if (recipeElement) {
+        recipeElement.scrollIntoView({ behavior: 'smooth' });
       }
-    } catch (error) {
-      console.error('Error getting meal details:', error);
-    } finally {
-      setLoadingDetails(false);
-    }
+    }, 100);
+  };
+
+  const handleBackToMeals = () => {
+    setShowRecipe(false);
+    setSelectedMeal(null);
   };
 
   const formatCalories = (nutrition) => {
@@ -34,7 +29,6 @@ const MealCards = ({ meals, onMealSelect }) => {
   };
 
   const estimateBasicPrice = (meal) => {
-    // Simple price estimation based on ingredients count and complexity
     const basePrice = 2.50;
     const ingredientCount = meal.ingredients?.length || 5;
     const complexityMultiplier = meal.difficulty === 'easy' ? 0.8 : meal.difficulty === 'hard' ? 1.3 : 1.0;
@@ -53,11 +47,12 @@ const MealCards = ({ meals, onMealSelect }) => {
 
   return (
     <div className="meal-cards-container">
+      {/* Meal Cards Grid */}
       <div className="meal-cards-grid">
         {meals.map((meal, index) => (
           <div 
             key={meal.id || index} 
-            className="meal-card"
+            className={`meal-card ${selectedMeal?.id === meal.id ? 'selected' : ''}`}
             onClick={() => handleMealClick(meal)}
           >
             <div className="meal-image">
@@ -66,7 +61,7 @@ const MealCards = ({ meals, onMealSelect }) => {
                   src={meal.image_url} 
                   alt={meal.title}
                   onError={(e) => {
-                    e.target.src = '/placeholder-meal.jpg'; // Fallback image
+                    e.target.src = '/placeholder-meal.jpg';
                   }}
                 />
               ) : (
@@ -109,7 +104,7 @@ const MealCards = ({ meals, onMealSelect }) => {
               
               <div className="meal-card-footer">
                 <button className="select-meal-btn">
-                  Select Meal
+                  {selectedMeal?.id === meal.id ? 'View Recipe' : 'Select Recipe'}
                 </button>
               </div>
             </div>
@@ -117,17 +112,207 @@ const MealCards = ({ meals, onMealSelect }) => {
         ))}
       </div>
       
-      {loadingDetails && (
-        <div className="loading-overlay">
-          <div className="loading-spinner"></div>
-          <p>Getting grocery details...</p>
+      {/* Inline Recipe Display */}
+      {showRecipe && selectedMeal && (
+        <div id="recipe-display" className="recipe-display-container">
+          <div className="recipe-header">
+            <button className="back-to-meals-btn" onClick={handleBackToMeals}>
+              ← Back to Meal Options
+            </button>
+            <h2>{selectedMeal.title}</h2>
+          </div>
+          
+          <div className="recipe-content">
+            <div className="recipe-left">
+              {/* Large Recipe Image */}
+              <div className="recipe-image-large">
+                {selectedMeal.image_url ? (
+                  <img src={selectedMeal.image_url} alt={selectedMeal.title} />
+                ) : (
+                  <div className="recipe-image-placeholder-large">🍽️</div>
+                )}
+              </div>
+              
+              {/* Recipe Overview */}
+              <div className="recipe-overview">
+                <h3>Recipe Overview</h3>
+                <div className="overview-grid">
+                  <div className="overview-item">
+                    <span className="overview-label">Prep Time:</span>
+                    <span>{selectedMeal.prep_time || 0} minutes</span>
+                  </div>
+                  <div className="overview-item">
+                    <span className="overview-label">Cook Time:</span>
+                    <span>{selectedMeal.cook_time || 0} minutes</span>
+                  </div>
+                  <div className="overview-item">
+                    <span className="overview-label">Total Time:</span>
+                    <span>{(selectedMeal.prep_time || 0) + (selectedMeal.cook_time || 0)} minutes</span>
+                  </div>
+                  <div className="overview-item">
+                    <span className="overview-label">Servings:</span>
+                    <span>{selectedMeal.servings || 2}</span>
+                  </div>
+                  <div className="overview-item">
+                    <span className="overview-label">Difficulty:</span>
+                    <span className="difficulty-badge">{selectedMeal.difficulty || 'Medium'}</span>
+                  </div>
+                  <div className="overview-item">
+                    <span className="overview-label">Cuisine:</span>
+                    <span>{selectedMeal.cuisine_type || 'International'}</span>
+                  </div>
+                </div>
+              </div>
+              
+              {/* Nutrition Information */}
+              {selectedMeal.nutrition && Object.keys(selectedMeal.nutrition).length > 0 && (
+                <div className="nutrition-section">
+                  <h3>Nutrition Information</h3>
+                  <div className="nutrition-grid">
+                    {selectedMeal.nutrition.calories && (
+                      <div className="nutrition-item">
+                        <span className="nutrition-icon">🔥</span>
+                        <span className="nutrition-label">Calories</span>
+                        <span className="nutrition-value">{Math.round(selectedMeal.nutrition.calories)}</span>
+                      </div>
+                    )}
+                    {selectedMeal.nutrition.protein && (
+                      <div className="nutrition-item">
+                        <span className="nutrition-icon">💪</span>
+                        <span className="nutrition-label">Protein</span>
+                        <span className="nutrition-value">{selectedMeal.nutrition.protein}</span>
+                      </div>
+                    )}
+                    {selectedMeal.nutrition.carbs && (
+                      <div className="nutrition-item">
+                        <span className="nutrition-icon">🌾</span>
+                        <span className="nutrition-label">Carbs</span>
+                        <span className="nutrition-value">{selectedMeal.nutrition.carbs}</span>
+                      </div>
+                    )}
+                    {selectedMeal.nutrition.fat && (
+                      <div className="nutrition-item">
+                        <span className="nutrition-icon">🥑</span>
+                        <span className="nutrition-label">Fat</span>
+                        <span className="nutrition-value">{selectedMeal.nutrition.fat}</span>
+                      </div>
+                    )}
+                  </div>
+                </div>
+              )}
+            </div>
+            
+            <div className="recipe-right">
+              {/* Ingredients List */}
+              <div className="ingredients-section">
+                <h3>🛒 Ingredients</h3>
+                {selectedMeal.ingredients && selectedMeal.ingredients.length > 0 ? (
+                  <div className="ingredients-list">
+                    {selectedMeal.ingredients.map((ingredient, index) => (
+                      <div key={index} className="ingredient-item">
+                        <span className="ingredient-amount">
+                          {ingredient.amount && ingredient.unit 
+                            ? `${ingredient.amount} ${ingredient.unit}` 
+                            : ingredient.original || ingredient.name}
+                        </span>
+                        <span className="ingredient-name">
+                          {ingredient.name || ''}
+                        </span>
+                      </div>
+                    ))}
+                  </div>
+                ) : (
+                  <p className="no-ingredients">Ingredients list not available for this recipe.</p>
+                )}
+              </div>
+              
+              {/* Diet Labels & Allergen Info */}
+              {(selectedMeal.diet_labels?.length > 0 || selectedMeal.allergen_info?.length > 0) && (
+                <div className="dietary-info">
+                  {selectedMeal.diet_labels?.length > 0 && (
+                    <div className="diet-labels">
+                      <h4>🥗 Dietary Information</h4>
+                      <div className="labels-list">
+                        {selectedMeal.diet_labels.map((label, index) => (
+                          <span key={index} className="diet-label">{label}</span>
+                        ))}
+                      </div>
+                    </div>
+                  )}
+                  
+                  {selectedMeal.allergen_info?.length > 0 && (
+                    <div className="allergen-info">
+                      <h4>⚠️ Allergen Information</h4>
+                      <div className="allergen-list">
+                        {selectedMeal.allergen_info.map((allergen, index) => (
+                          <span key={index} className="allergen-tag">{allergen}</span>
+                        ))}
+                      </div>
+                    </div>
+                  )}
+                </div>
+              )}
+              
+              {/* Cooking Instructions */}
+              <div className="instructions-section">
+                <h3>👨‍🍳 Cooking Instructions</h3>
+                {selectedMeal.instructions && selectedMeal.instructions.length > 0 ? (
+                  <div className="instructions-list">
+                    {selectedMeal.instructions.map((instruction, index) => (
+                      <div key={index} className="instruction-step">
+                        <div className="step-number">{index + 1}</div>
+                        <div className="step-content">{instruction}</div>
+                      </div>
+                    ))}
+                  </div>
+                ) : (
+                  <div className="no-instructions">
+                    <p>Detailed instructions are not available for this recipe.</p>
+                    {selectedMeal.recipe_url && (
+                      <p>
+                        <a 
+                          href={selectedMeal.recipe_url} 
+                          target="_blank" 
+                          rel="noopener noreferrer"
+                          className="external-recipe-link"
+                        >
+                          View full recipe on original site →
+                        </a>
+                      </p>
+                    )}
+                  </div>
+                )}
+              </div>
+              
+              {/* Action Buttons */}
+              <div className="recipe-actions">
+                {selectedMeal.recipe_url && (
+                  <a 
+                    href={selectedMeal.recipe_url} 
+                    target="_blank" 
+                    rel="noopener noreferrer"
+                    className="action-btn external-link-btn"
+                  >
+                    🔗 View Original Recipe
+                  </a>
+                )}
+                
+                <button 
+                  className="action-btn grocery-btn"
+                  onClick={() => onMealSelect && onMealSelect(selectedMeal, null)}
+                >
+                  🛒 Get Grocery List
+                </button>
+              </div>
+            </div>
+          </div>
         </div>
       )}
     </div>
   );
 };
 
-// components/MealDetailView.js  
+// Keep the existing MealDetailView for grocery integration
 const MealDetailView = ({ meal, groceryDetails, onBack }) => {
   if (!meal) return null;
 
@@ -137,136 +322,57 @@ const MealDetailView = ({ meal, groceryDetails, onBack }) => {
     <div className="meal-detail-container">
       <div className="meal-detail-header">
         <button className="back-button" onClick={onBack}>
-          ← Back to Meals
+          ← Back to Recipe
         </button>
-        <h2>{meal.title}</h2>
+        <h2>🛒 Grocery Shopping for: {meal.title}</h2>
       </div>
       
       <div className="meal-detail-content">
-        <div className="meal-detail-left">
-          <div className="meal-image-large">
-            {meal.image_url ? (
-              <img src={meal.image_url} alt={meal.title} />
-            ) : (
-              <div className="meal-image-placeholder-large">🍽️</div>
-            )}
-          </div>
+        <div className="grocery-section">
+          <h3>🛒 Slovenian Grocery Shopping</h3>
           
-          <div className="meal-info-detailed">
-            <h3>Meal Information</h3>
-            <div className="info-grid">
-              <div className="info-item">
-                <span className="info-label">Prep Time:</span>
-                <span>{meal.prep_time || 0} minutes</span>
+          {groceryDetails && groceryDetails.shopping_list?.length > 0 ? (
+            <>
+              <div className="total-cost">
+                <span className="cost-label">Total Estimated Cost:</span>
+                <span className="cost-value">{formatPrice(groceryDetails.estimated_cost)}</span>
               </div>
-              <div className="info-item">
-                <span className="info-label">Cook Time:</span>
-                <span>{meal.cook_time || 0} minutes</span>
-              </div>
-              <div className="info-item">
-                <span className="info-label">Servings:</span>
-                <span>{meal.servings || 2}</span>
-              </div>
-              <div className="info-item">
-                <span className="info-label">Difficulty:</span>
-                <span>{meal.difficulty || 'Medium'}</span>
-              </div>
-            </div>
-          </div>
-          
-          {meal.nutrition && Object.keys(meal.nutrition).length > 0 && (
-            <div className="nutrition-info">
-              <h3>Nutrition</h3>
-              <div className="nutrition-grid">
-                {meal.nutrition.calories && (
-                  <div className="nutrition-item">
-                    <span className="nutrition-label">Calories:</span>
-                    <span>{Math.round(meal.nutrition.calories)}</span>
-                  </div>
-                )}
-                {meal.nutrition.protein && (
-                  <div className="nutrition-item">
-                    <span className="nutrition-label">Protein:</span>
-                    <span>{meal.nutrition.protein}</span>
-                  </div>
-                )}
-                {meal.nutrition.carbs && (
-                  <div className="nutrition-item">
-                    <span className="nutrition-label">Carbs:</span>
-                    <span>{meal.nutrition.carbs}</span>
-                  </div>
-                )}
-                {meal.nutrition.fat && (
-                  <div className="nutrition-item">
-                    <span className="nutrition-label">Fat:</span>
-                    <span>{meal.nutrition.fat}</span>
-                  </div>
-                )}
-              </div>
-            </div>
-          )}
-        </div>
-        
-        <div className="meal-detail-right">
-          <div className="grocery-section">
-            <h3>🛒 Slovenian Grocery Shopping</h3>
-            
-            {groceryDetails && groceryDetails.shopping_list?.length > 0 ? (
-              <>
-                <div className="total-cost">
-                  <span className="cost-label">Total Estimated Cost:</span>
-                  <span className="cost-value">{formatPrice(groceryDetails.estimated_cost)}</span>
+              
+              <div className="available-stores">
+                <h4>Available in stores:</h4>
+                <div className="stores-list">
+                  {groceryDetails.available_stores?.map((store, index) => (
+                    <span key={index} className="store-badge">
+                      {store.toUpperCase()}
+                    </span>
+                  ))}
                 </div>
-                
-                <div className="available-stores">
-                  <h4>Available in stores:</h4>
-                  <div className="stores-list">
-                    {groceryDetails.available_stores?.map((store, index) => (
-                      <span key={index} className="store-badge">
-                        {store.toUpperCase()}
-                      </span>
-                    ))}
-                  </div>
-                </div>
-                
-                <div className="shopping-list">
-                  <h4>Shopping List:</h4>
-                  <div className="ingredients-list">
-                    {groceryDetails.shopping_list.map((item, index) => (
-                      <div key={index} className="ingredient-item">
-                        <div className="ingredient-info">
-                          <span className="ingredient-name">{item.ingredient}</span>
-                          <span className="ingredient-slovenian">({item.slovenian_name})</span>
-                          <span className="ingredient-amount">{item.needed_amount}</span>
-                        </div>
-                        <div className="ingredient-product">
-                          <span className="product-name">{item.product?.product_name}</span>
-                          <span className="product-store">{item.product?.store_name?.toUpperCase()}</span>
-                          <span className="product-price">{formatPrice(item.estimated_cost)}</span>
-                        </div>
+              </div>
+              
+              <div className="shopping-list">
+                <h4>Shopping List:</h4>
+                <div className="ingredients-list">
+                  {groceryDetails.shopping_list.map((item, index) => (
+                    <div key={index} className="ingredient-item">
+                      <div className="ingredient-info">
+                        <span className="ingredient-name">{item.ingredient}</span>
+                        <span className="ingredient-slovenian">({item.slovenian_name})</span>
+                        <span className="ingredient-amount">{item.needed_amount}</span>
                       </div>
-                    ))}
-                  </div>
+                      <div className="ingredient-product">
+                        <span className="product-name">{item.product?.product_name}</span>
+                        <span className="product-store">{item.product?.store_name?.toUpperCase()}</span>
+                        <span className="product-price">{formatPrice(item.estimated_cost)}</span>
+                      </div>
+                    </div>
+                  ))}
                 </div>
-              </>
-            ) : (
-              <div className="no-grocery-info">
-                <p>Some ingredients may not be available in our Slovenian grocery database.</p>
-                <p>You can still prepare this meal by shopping at local stores.</p>
               </div>
-            )}
-          </div>
-          
-          {meal.recipe_url && (
-            <div className="recipe-link">
-              <a 
-                href={meal.recipe_url} 
-                target="_blank" 
-                rel="noopener noreferrer"
-                className="full-recipe-btn"
-              >
-                View Full Recipe →
-              </a>
+            </>
+          ) : (
+            <div className="no-grocery-info">
+              <p>Some ingredients may not be available in our Slovenian grocery database.</p>
+              <p>You can still prepare this meal by shopping at local stores.</p>
             </div>
           )}
         </div>
