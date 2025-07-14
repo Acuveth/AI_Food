@@ -5,6 +5,7 @@ import PriceComparisonResults from './PriceComparisonResults';
 import MealResults, { ReverseMealResults } from './MealResults';
 import GroceryAnalysisResults from './GroceryAnalysisResults';
 import GeneralHelpResults, { ClarificationResults } from './HelpResults';
+import RecipeDisplay from './RecipeDisplay';
 
 const ChatMessage = ({ msg, onMealSelect, onSuggestionClick }) => {
   const formatTime = (timestamp) => {

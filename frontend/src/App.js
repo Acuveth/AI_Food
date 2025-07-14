@@ -80,10 +80,10 @@ function App() {
   };
 
   const handleMealSelect = async (meal) => {
-    // Show loading message immediately
+    // Show generic loading message immediately
     const loadingMessage = {
       role: 'assistant',
-      content: `Analyzing grocery prices for ${meal.title}...`,
+      content: `Finding grocery prices...`,
       timestamp: new Date(),
       isLoading: true
     };

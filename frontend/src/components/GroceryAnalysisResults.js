@@ -47,7 +47,23 @@ const GroceryAnalysisResults = ({ data }) => {
           <div className="ingredients-list">
             {combined_analysis.item_details?.map((item, index) => (
               <div key={index} className="ingredient-row">
-                <span className="ingredient-name">{item.ingredient}</span>
+                <div className="ingredient-info">
+                  {item.found && item.product?.product_name ? (
+                    <>
+                      <span className="ingredient-name">{item.product.product_name}</span>
+                      <span className="ingredient-search-term">
+                        for: {item.ingredient}
+                      </span>
+                    </>
+                  ) : (
+                    <>
+                      <span className="ingredient-name">{item.ingredient}</span>
+                      <span className="ingredient-not-found-note">
+                        No matching product found
+                      </span>
+                    </>
+                  )}
+                </div>
                 <div className="ingredient-price">
                   {item.found ? (
                     <>
