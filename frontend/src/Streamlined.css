@@ -1027,3 +1027,244 @@ body {
 .ingredients-list::-webkit-scrollbar-thumb:hover {
   background: var(--text-muted);
 }
+
+/* Additional CSS for enhanced grocery analysis - Add to Streamlined.css */
+
+/* Enhanced ingredient row styling */
+.ingredient-row {
+  display: flex;
+  justify-content: space-between;
+  align-items: flex-start;
+  padding: 16px 20px;
+  border-bottom: 1px solid var(--border-color);
+  background: var(--bg-primary);
+}
+
+.ingredient-row:last-child {
+  border-bottom: none;
+}
+
+.ingredient-info {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  flex: 1;
+  margin-right: 15px;
+}
+
+.ingredient-name {
+  color: var(--text-primary);
+  font-weight: 600;
+  font-size: 1rem;
+  text-transform: capitalize;
+}
+
+.product-name-found {
+  color: var(--text-secondary);
+  font-size: 0.85rem;
+  font-style: italic;
+  background: rgba(79, 70, 229, 0.1);
+  padding: 3px 8px;
+  border-radius: 4px;
+  border: 1px solid rgba(79, 70, 229, 0.2);
+  max-width: fit-content;
+}
+
+.ingredient-price {
+  display: flex;
+  flex-direction: column;
+  align-items: flex-end;
+  gap: 2px;
+  min-width: 80px;
+}
+
+.ingredient-price .price {
+  color: var(--success-color);
+  font-weight: 600;
+  font-size: 1.1rem;
+}
+
+.ingredient-price .store {
+  color: var(--text-muted);
+  font-size: 0.7rem;
+  text-transform: uppercase;
+  font-weight: 500;
+  background: var(--bg-card);
+  padding: 2px 6px;
+  border-radius: 3px;
+  border: 1px solid var(--border-color);
+}
+
+.not-found {
+  color: var(--error-color);
+  font-size: 0.9rem;
+  font-style: italic;
+  background: rgba(239, 68, 68, 0.1);
+  padding: 4px 8px;
+  border-radius: 4px;
+  border: 1px solid rgba(239, 68, 68, 0.2);
+}
+
+/* NO SCROLL INGREDIENTS LIST */
+.ingredients-list-no-scroll {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  background: var(--bg-secondary);
+  border-radius: var(--radius);
+  border: 1px solid var(--border-color);
+  padding: 0;
+  /* Remove max-height and overflow to show all ingredients */
+}
+
+.ingredients-list-no-scroll .ingredient-item {
+  padding: 12px 15px;
+  border-bottom: 1px solid var(--border-color);
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+
+.ingredients-list-no-scroll .ingredient-item:last-child {
+  border-bottom: none;
+}
+
+/* GROCERY STATUS STYLING */
+.grocery-status {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: 12px;
+  border-radius: var(--radius);
+  border: 1px solid var(--border-color);
+  background: var(--bg-secondary);
+  margin-top: 10px;
+}
+
+.grocery-loading-status {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  color: var(--accent-color);
+  font-weight: 500;
+}
+
+.grocery-ready-status {
+  color: var(--success-color);
+  font-weight: 500;
+}
+
+.mini-spinner {
+  width: 16px;
+  height: 16px;
+  border: 2px solid var(--bg-card);
+  border-top: 2px solid var(--accent-color);
+  border-radius: 50%;
+  animation: spin 1s linear infinite;
+}
+
+/* Recipe container styling */
+.recipe-container {
+  width: 100%;
+  margin-top: 20px;
+  animation: slideDown 0.3s ease-out;
+}
+
+@keyframes slideDown {
+  from {
+    opacity: 0;
+    transform: translateY(-20px);
+  }
+  to {
+    opacity: 1;
+    transform: translateY(0);
+  }
+}
+
+/* Enhanced grocery analysis container */
+.grocery-analysis-container {
+  margin-top: 25px;
+  background: var(--bg-secondary);
+  border-radius: var(--radius-lg);
+  border: 1px solid var(--border-color);
+  overflow: hidden;
+  animation: slideDown 0.3s ease-out;
+}
+
+/* Loading state for grocery analysis */
+.grocery-loading-overlay {
+  position: fixed;
+  top: 0;
+  left: 0;
+  width: 100%;
+  height: 100%;
+  background: rgba(0, 0, 0, 0.8);
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  z-index: 1000;
+  color: white;
+}
+
+.grocery-loading-overlay .loading-spinner {
+  width: 40px;
+  height: 40px;
+  border: 3px solid rgba(255, 255, 255, 0.3);
+  border-top: 3px solid white;
+  border-radius: 50%;
+  animation: spin 1s linear infinite;
+  margin-bottom: 20px;
+}
+
+.grocery-loading-overlay p {
+  font-size: 1.1rem;
+  font-weight: 500;
+  text-align: center;
+  margin: 0;
+}
+
+/* Enhanced action buttons */
+.action-btn.grocery-btn:disabled {
+  background: var(--bg-secondary);
+  color: var(--text-muted);
+  cursor: not-allowed;
+  transform: none;
+}
+
+.action-btn.grocery-btn:disabled:hover {
+  background: var(--bg-secondary);
+  transform: none;
+}
+
+/* Responsive improvements */
+@media (max-width: 768px) {
+  .ingredient-row {
+    flex-direction: column;
+    align-items: flex-start;
+    gap: 10px;
+    padding: 12px 15px;
+  }
+  
+  .ingredient-info {
+    margin-right: 0;
+    width: 100%;
+  }
+  
+  .ingredient-price {
+    align-items: flex-start;
+    flex-direction: row;
+    gap: 10px;
+    width: 100%;
+    justify-content: space-between;
+  }
+  
+  .ingredient-price .store {
+    order: -1;
+  }
+  
+  .product-name-found {
+    max-width: 100%;
+    word-break: break-word;
+  }
+}
