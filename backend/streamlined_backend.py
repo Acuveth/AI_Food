@@ -170,7 +170,7 @@ async def intelligent_request(request: UserInputRequest):
         elif intent == "SEARCH_MEALS":
             result = await search_meals(
                 user_request=request.input,
-                max_results=12
+                max_results=20
             )
             
             return APIResponse(

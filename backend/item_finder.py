@@ -1,7 +1,8 @@
 #!/usr/bin/env python3
 """
-Item Finder Module
+Item Finder Module - FIXED VERSION
 Finds specific items across all stores for price comparison
+Fixed the None comparison issue in price operations
 """
 
 import asyncio
@@ -25,6 +26,29 @@ class ItemFinder:
         """Ensure database connection is available"""
         if self.db_handler is None:
             self.db_handler = await get_db_handler()
+    
+    def _safe_float(self, value, default=0.0):
+        """Safely convert value to float, handling None cases"""
+        if value is None:
+            return default
+        try:
+            return float(value)
+        except (ValueError, TypeError):
+            return default
+    
+    def _safe_compare_prices(self, price1, price2, comparison='min'):
+        """Safely compare prices, handling None values"""
+        p1 = self._safe_float(price1)
+        p2 = self._safe_float(price2)
+        
+        # If both prices are 0 (from None), return None
+        if p1 == 0.0 and p2 == 0.0:
+            return None
+            
+        if comparison == 'min':
+            return min(p1, p2) if p1 > 0 and p2 > 0 else max(p1, p2)
+        else:  # max
+            return max(p1, p2)
     
     async def compare_item_prices(
         self,
@@ -97,7 +121,7 @@ class ItemFinder:
             }
     
     def _organize_by_store(self, results: List[Dict], max_per_store: int) -> Dict[str, Dict]:
-        """Organize results by store"""
+        """Organize results by store with safe price handling"""
         organized = {}
         
         # Initialize all stores
@@ -121,33 +145,44 @@ class ItemFinder:
                 if len(store_data["products"]) < max_per_store:
                     store_data["products"].append(product)
                 
-                # Update statistics
+                # Update statistics with safe price handling
                 store_data["product_count"] += 1
-                current_price = product.get('current_price', 0) or 0
+                current_price = self._safe_float(product.get('current_price'))
                 
-                if store_data["cheapest_product"] is None or current_price < store_data["cheapest_product"].get('current_price', float('inf')):
-                    store_data["cheapest_product"] = product
-                
-                # Update price range
-                if store_data["price_range"]["min"] is None or current_price < store_data["price_range"]["min"]:
-                    store_data["price_range"]["min"] = current_price
-                if store_data["price_range"]["max"] is None or current_price > store_data["price_range"]["max"]:
-                    store_data["price_range"]["max"] = current_price
+                # Only process if price is valid (> 0)
+                if current_price > 0:
+                    # Update cheapest product
+                    if (store_data["cheapest_product"] is None or 
+                        current_price < self._safe_float(store_data["cheapest_product"].get('current_price'))):
+                        store_data["cheapest_product"] = product
+                    
+                    # Update price range
+                    if store_data["price_range"]["min"] is None or current_price < store_data["price_range"]["min"]:
+                        store_data["price_range"]["min"] = current_price
+                    if store_data["price_range"]["max"] is None or current_price > store_data["price_range"]["max"]:
+                        store_data["price_range"]["max"] = current_price
         
         # Calculate average prices
         for store_name, store_data in organized.items():
             if store_data["products"]:
-                avg_price = sum(p.get('current_price', 0) for p in store_data["products"]) / len(store_data["products"])
-                store_data["avg_price"] = round(avg_price, 2)
+                valid_prices = [self._safe_float(p.get('current_price')) for p in store_data["products"]]
+                valid_prices = [p for p in valid_prices if p > 0]
+                if valid_prices:
+                    store_data["avg_price"] = round(sum(valid_prices) / len(valid_prices), 2)
         
         return organized
     
     async def _analyze_price_comparison(self, results: List[Dict]) -> Dict[str, Any]:
-        """Analyze price differences and provide insights"""
+        """Analyze price differences and provide insights with safe price handling"""
         if not results:
             return {}
         
-        prices = [p.get('current_price', 0) for p in results if p.get('current_price', 0) > 0]
+        # Get valid prices only
+        prices = []
+        for p in results:
+            price = self._safe_float(p.get('current_price'))
+            if price > 0:
+                prices.append(price)
         
         if not prices:
             return {"message": "No valid prices found"}
@@ -158,9 +193,17 @@ class ItemFinder:
         avg_price = sum(prices) / len(prices)
         price_difference = max_price - min_price
         
-        # Find cheapest and most expensive
-        cheapest_product = min(results, key=lambda x: x.get('current_price', float('inf')))
-        most_expensive = max(results, key=lambda x: x.get('current_price', 0))
+        # Find cheapest and most expensive with safe comparison
+        cheapest_product = None
+        most_expensive = None
+        
+        for product in results:
+            current_price = self._safe_float(product.get('current_price'))
+            if current_price > 0:
+                if cheapest_product is None or current_price < self._safe_float(cheapest_product.get('current_price')):
+                    cheapest_product = product
+                if most_expensive is None or current_price > self._safe_float(most_expensive.get('current_price')):
+                    most_expensive = product
         
         # Calculate potential savings
         potential_savings = price_difference
@@ -173,24 +216,29 @@ class ItemFinder:
                 "average_price": round(avg_price, 2),
                 "price_difference": round(price_difference, 2),
                 "price_range_percentage": round(savings_percentage, 1)
-            },
-            "cheapest_option": {
+            }
+        }
+        
+        if cheapest_product:
+            analysis["cheapest_option"] = {
                 "product_name": cheapest_product.get('product_name'),
                 "store": cheapest_product.get('store_name', '').upper(),
-                "price": cheapest_product.get('current_price'),
+                "price": self._safe_float(cheapest_product.get('current_price')),
                 "has_discount": cheapest_product.get('has_discount', False),
                 "discount_percentage": cheapest_product.get('discount_percentage')
-            },
-            "most_expensive": {
+            }
+        
+        if most_expensive:
+            analysis["most_expensive"] = {
                 "product_name": most_expensive.get('product_name'),
                 "store": most_expensive.get('store_name', '').upper(),
-                "price": most_expensive.get('current_price')
-            },
-            "savings_potential": {
-                "max_savings": round(potential_savings, 2),
-                "savings_percentage": round(savings_percentage, 1),
-                "recommendation": "Always choose the cheapest option" if potential_savings > 1 else "Prices are similar across stores"
+                "price": self._safe_float(most_expensive.get('current_price'))
             }
+        
+        analysis["savings_potential"] = {
+            "max_savings": round(potential_savings, 2),
+            "savings_percentage": round(savings_percentage, 1),
+            "recommendation": "Always choose the cheapest option" if potential_savings > 1 else "Prices are similar across stores"
         }
         
         # Use LLM for deeper analysis if available
@@ -206,42 +254,55 @@ class ItemFinder:
         return analysis
     
     def _find_best_deals(self, results: List[Dict]) -> Dict[str, Any]:
-        """Find the best deals among the results"""
+        """Find the best deals among the results with safe price handling"""
         if not results:
             return {}
         
+        # Filter valid results
+        valid_results = []
+        for r in results:
+            if self._safe_float(r.get('current_price')) > 0:
+                valid_results.append(r)
+        
+        if not valid_results:
+            return {}
+        
         # Find products with discounts
-        discounted_products = [p for p in results if p.get('has_discount', False)]
+        discounted_products = [p for p in valid_results if p.get('has_discount', False)]
         
         # Find overall cheapest
-        cheapest_overall = min(results, key=lambda x: x.get('current_price', float('inf')))
+        cheapest_overall = min(valid_results, 
+                             key=lambda x: self._safe_float(x.get('current_price')))
         
         # Find best discount percentage
-        best_discount = max(discounted_products, key=lambda x: x.get('discount_percentage', 0)) if discounted_products else None
+        best_discount = None
+        if discounted_products:
+            best_discount = max(discounted_products, 
+                              key=lambda x: self._safe_float(x.get('discount_percentage')))
         
         # Find best value (considering health score if available)
-        best_value = self._calculate_best_value(results)
+        best_value = self._calculate_best_value(valid_results)
         
         return {
             "cheapest_overall": {
                 "product": cheapest_overall.get('product_name'),
                 "store": cheapest_overall.get('store_name', '').upper(),
-                "price": cheapest_overall.get('current_price'),
-                "savings_vs_expensive": self._calculate_savings_vs_most_expensive(cheapest_overall, results)
+                "price": self._safe_float(cheapest_overall.get('current_price')),
+                "savings_vs_expensive": self._calculate_savings_vs_most_expensive(cheapest_overall, valid_results)
             },
             "best_discount": {
                 "product": best_discount.get('product_name') if best_discount else None,
                 "store": best_discount.get('store_name', '').upper() if best_discount else None,
-                "discount": best_discount.get('discount_percentage') if best_discount else None,
-                "price": best_discount.get('current_price') if best_discount else None,
-                "original_price": best_discount.get('regular_price') if best_discount else None
+                "discount": self._safe_float(best_discount.get('discount_percentage')) if best_discount else None,
+                "price": self._safe_float(best_discount.get('current_price')) if best_discount else None,
+                "original_price": self._safe_float(best_discount.get('regular_price')) if best_discount else None
             } if best_discount else None,
             "best_value": best_value,
             "total_discounted_items": len(discounted_products)
         }
     
     def _calculate_best_value(self, results: List[Dict]) -> Dict[str, Any]:
-        """Calculate best value considering price and quality factors"""
+        """Calculate best value considering price and quality factors with safe handling"""
         if not results:
             return {}
         
@@ -249,12 +310,13 @@ class ItemFinder:
         best_value_score = 0
         
         for product in results:
-            price = product.get('current_price', 0) or 0
-            health_score = product.get('ai_health_score', 5) or 5
-            discount = product.get('discount_percentage', 0) or 0
+            price = self._safe_float(product.get('current_price'))
+            health_score = self._safe_float(product.get('ai_health_score'), 5)
+            discount = self._safe_float(product.get('discount_percentage'))
             
-            # Calculate value score (higher health score, lower price, higher discount = better value)
+            # Only calculate for products with valid prices
             if price > 0:
+                # Calculate value score (higher health score, lower price, higher discount = better value)
                 price_score = max(0, 1 - (price / 10))  # Normalize price (assuming max reasonable price is 10)
                 health_score_norm = health_score / 10
                 discount_score = discount / 100
@@ -269,8 +331,8 @@ class ItemFinder:
             return {
                 "product": best_value_product.get('product_name'),
                 "store": best_value_product.get('store_name', '').upper(),
-                "price": best_value_product.get('current_price'),
-                "health_score": best_value_product.get('ai_health_score'),
+                "price": self._safe_float(best_value_product.get('current_price')),
+                "health_score": self._safe_float(best_value_product.get('ai_health_score')),
                 "value_score": round(best_value_score, 3),
                 "reasoning": "Best combination of price, health score, and discounts"
             }
@@ -278,17 +340,26 @@ class ItemFinder:
         return {}
     
     def _calculate_savings_vs_most_expensive(self, cheapest: Dict, all_results: List[Dict]) -> float:
-        """Calculate savings compared to most expensive option"""
+        """Calculate savings compared to most expensive option with safe handling"""
         if not all_results:
             return 0
         
-        max_price = max(p.get('current_price', 0) for p in all_results)
-        cheapest_price = cheapest.get('current_price', 0)
+        valid_prices = []
+        for p in all_results:
+            price = self._safe_float(p.get('current_price'))
+            if price > 0:
+                valid_prices.append(price)
+        
+        if not valid_prices:
+            return 0
+        
+        max_price = max(valid_prices)
+        cheapest_price = self._safe_float(cheapest.get('current_price'))
         
         return round(max_price - cheapest_price, 2)
     
     def _rank_stores(self, organized_results: Dict[str, Dict]) -> List[Dict]:
-        """Rank stores based on price competitiveness"""
+        """Rank stores based on price competitiveness with safe handling"""
         rankings = []
         
         for store_name, store_data in organized_results.items():
@@ -298,36 +369,44 @@ class ItemFinder:
                 
                 # Factor 1: Average price (lower is better)
                 avg_price = store_data["avg_price"]
-                all_avg_prices = [s["avg_price"] for s in organized_results.values() if s["avg_price"] > 0]
-                if all_avg_prices:
-                    min_avg = min(all_avg_prices)
-                    max_avg = max(all_avg_prices)
-                    if max_avg > min_avg:
-                        price_score = 1 - ((avg_price - min_avg) / (max_avg - min_avg))
-                        score += price_score * 0.4
-                        factors.append(f"Price competitiveness: {price_score:.2f}")
+                if avg_price > 0:  # Only process if valid price
+                    all_avg_prices = [s["avg_price"] for s in organized_results.values() if s["avg_price"] > 0]
+                    if len(all_avg_prices) > 1:  # Need at least 2 stores for comparison
+                        min_avg = min(all_avg_prices)
+                        max_avg = max(all_avg_prices)
+                        if max_avg > min_avg:
+                            price_score = 1 - ((avg_price - min_avg) / (max_avg - min_avg))
+                            score += price_score * 0.4
+                            factors.append(f"Price competitiveness: {price_score:.2f}")
                 
                 # Factor 2: Product availability
-                availability_score = min(store_data["product_count"] / 10, 1.0)  # Normalize to max 10 products
+                availability_score = min(store_data["product_count"] / 10, 1.0)
                 score += availability_score * 0.3
                 factors.append(f"Product variety: {availability_score:.2f}")
                 
                 # Factor 3: Has cheapest option
                 cheapest_product = store_data["cheapest_product"]
-                all_cheapest_prices = [s["cheapest_product"].get('current_price', float('inf')) 
-                                     for s in organized_results.values() if s["cheapest_product"]]
-                if all_cheapest_prices and cheapest_product:
-                    global_cheapest = min(all_cheapest_prices)
-                    if cheapest_product.get('current_price', 0) == global_cheapest:
-                        score += 0.3
-                        factors.append("Has cheapest option: 0.30")
+                if cheapest_product:
+                    all_cheapest_prices = []
+                    for s in organized_results.values():
+                        if s["cheapest_product"]:
+                            price = self._safe_float(s["cheapest_product"].get('current_price'))
+                            if price > 0:
+                                all_cheapest_prices.append(price)
+                    
+                    if all_cheapest_prices:
+                        global_cheapest = min(all_cheapest_prices)
+                        current_cheapest = self._safe_float(cheapest_product.get('current_price'))
+                        if current_cheapest > 0 and abs(current_cheapest - global_cheapest) < 0.01:  # Allow small float precision errors
+                            score += 0.3
+                            factors.append("Has cheapest option: 0.30")
                 
                 rankings.append({
                     "store": store_name.upper(),
                     "rank_score": round(score, 3),
                     "avg_price": avg_price,
                     "product_count": store_data["product_count"],
-                    "cheapest_price": cheapest_product.get('current_price') if cheapest_product else None,
+                    "cheapest_price": self._safe_float(cheapest_product.get('current_price')) if cheapest_product else None,
                     "factors": factors
                 })
         
@@ -341,7 +420,7 @@ class ItemFinder:
         return rankings
     
     def _analyze_product_variations(self, results: List[Dict]) -> Dict[str, Any]:
-        """Analyze different product variations found"""
+        """Analyze different product variations found with safe handling"""
         if not results:
             return {}
         
@@ -361,7 +440,7 @@ class ItemFinder:
                 variations[key_words] = {
                     "representative_name": product.get('product_name'),
                     "products": [],
-                    "price_range": {"min": float('inf'), "max": 0},
+                    "price_range": {"min": None, "max": None},
                     "stores": set()
                 }
             
@@ -369,11 +448,12 @@ class ItemFinder:
             var_data["products"].append(product)
             var_data["stores"].add(product.get('store_name', ''))
             
-            price = product.get('current_price', 0) or 0
-            if price < var_data["price_range"]["min"]:
-                var_data["price_range"]["min"] = price
-            if price > var_data["price_range"]["max"]:
-                var_data["price_range"]["max"] = price
+            price = self._safe_float(product.get('current_price'))
+            if price > 0:
+                if var_data["price_range"]["min"] is None or price < var_data["price_range"]["min"]:
+                    var_data["price_range"]["min"] = price
+                if var_data["price_range"]["max"] is None or price > var_data["price_range"]["max"]:
+                    var_data["price_range"]["max"] = price
         
         # Process variations
         processed_variations = []
@@ -382,8 +462,8 @@ class ItemFinder:
             var_data["product_count"] = len(var_data["products"])
             var_data["store_count"] = len(var_data["stores"])
             
-            # Fix infinite min price
-            if var_data["price_range"]["min"] == float('inf'):
+            # Ensure min price is set even if no valid prices found
+            if var_data["price_range"]["min"] is None:
                 var_data["price_range"]["min"] = 0
             
             processed_variations.append(var_data)
