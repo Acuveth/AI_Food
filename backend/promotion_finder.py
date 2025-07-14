@@ -1,7 +1,8 @@
 #!/usr/bin/env python3
 """
-Promotion Finder Module
+Promotion Finder Module - FIXED VERSION
 Finds all promotional items with optional filtering
+FIXED: Proper None value handling for database fields
 """
 
 import asyncio
@@ -25,6 +26,24 @@ class PromotionFinder:
         if self.db_handler is None:
             self.db_handler = await get_db_handler()
     
+    def _safe_float(self, value, default=0.0):
+        """Safely convert value to float, handling None and invalid values"""
+        if value is None:
+            return default
+        try:
+            return float(value)
+        except (ValueError, TypeError):
+            return default
+    
+    def _safe_int(self, value, default=0):
+        """Safely convert value to int, handling None and invalid values"""
+        if value is None:
+            return default
+        try:
+            return int(value)
+        except (ValueError, TypeError):
+            return default
+
     async def find_promotions(
         self, 
         search_filter: Optional[str] = None,
@@ -95,7 +114,7 @@ class PromotionFinder:
             # Execute query
             promotions = await self.db_handler.execute_query(query, params)
             
-            # Calculate additional metrics
+            # Calculate additional metrics with safe handling
             processed_promotions = self._process_promotion_data(promotions)
             
             # Get analysis insights
@@ -138,14 +157,14 @@ class PromotionFinder:
             }
     
     def _process_promotion_data(self, promotions: List[Dict]) -> List[Dict]:
-        """Process and enhance promotion data with additional calculations"""
+        """Process and enhance promotion data with additional calculations using safe math"""
         processed = []
         
         for promo in promotions:
-            # Calculate savings amount
-            regular_price = promo.get('regular_price', 0) or 0
-            current_price = promo.get('current_price', 0) or 0
-            savings_amount = regular_price - current_price
+            # Safe calculation of savings amount
+            regular_price = self._safe_float(promo.get('regular_price'))
+            current_price = self._safe_float(promo.get('current_price'))
+            savings_amount = max(0, regular_price - current_price)  # Ensure non-negative
             
             # Enhance with additional fields
             enhanced_promo = {
@@ -161,8 +180,8 @@ class PromotionFinder:
     
     def _assess_deal_quality(self, promo: Dict) -> str:
         """Assess the quality of a deal based on discount percentage and other factors"""
-        discount = promo.get('discount_percentage', 0) or 0
-        health_score = promo.get('ai_health_score', 5) or 5
+        discount = self._safe_float(promo.get('discount_percentage'))
+        health_score = self._safe_float(promo.get('ai_health_score'), 5)
         
         # Base assessment on discount percentage
         if discount >= 40:
@@ -184,14 +203,14 @@ class PromotionFinder:
     
     def _calculate_value_score(self, promo: Dict) -> float:
         """Calculate a value score combining discount, price, and health factors"""
-        discount = promo.get('discount_percentage', 0) or 0
-        current_price = promo.get('current_price', 0) or 0
-        health_score = promo.get('ai_health_score', 5) or 5
+        discount = self._safe_float(promo.get('discount_percentage'))
+        current_price = self._safe_float(promo.get('current_price'))
+        health_score = self._safe_float(promo.get('ai_health_score'), 5)
         
-        # Normalize components
-        discount_score = min(discount / 50, 1.0)  # Normalize to 0-1
-        price_score = max(0, 1 - (current_price / 10))  # Lower price = higher score
-        health_score_normalized = health_score / 10
+        # Normalize components with safe division
+        discount_score = min(discount / 50, 1.0) if discount > 0 else 0
+        price_score = max(0, 1 - (current_price / 10)) if current_price > 0 else 0
+        health_score_normalized = health_score / 10 if health_score > 0 else 0.5
         
         # Weighted combination
         value_score = (discount_score * 0.4 + price_score * 0.3 + health_score_normalized * 0.3)
@@ -199,19 +218,32 @@ class PromotionFinder:
         return round(value_score, 3)
     
     async def _analyze_promotions(self, promotions: List[Dict]) -> Dict[str, Any]:
-        """Generate analysis insights for promotions"""
+        """Generate analysis insights for promotions with safe calculations"""
         if not promotions:
             return {"message": "No promotions found to analyze"}
         
-        # Basic statistics
+        # Basic statistics with safe calculations
         total_promotions = len(promotions)
-        avg_discount = sum(p.get('discount_percentage', 0) for p in promotions) / total_promotions
-        total_savings = sum(p.get('savings_amount', 0) for p in promotions)
         
-        # Best deals
-        best_discount = max(promotions, key=lambda x: x.get('discount_percentage', 0))
-        best_savings = max(promotions, key=lambda x: x.get('savings_amount', 0))
-        best_value = max(promotions, key=lambda x: x.get('value_score', 0))
+        # Safe average discount calculation
+        valid_discounts = [self._safe_float(p.get('discount_percentage')) for p in promotions]
+        valid_discounts = [d for d in valid_discounts if d > 0]
+        avg_discount = sum(valid_discounts) / len(valid_discounts) if valid_discounts else 0
+        
+        # Safe total savings calculation
+        valid_savings = [self._safe_float(p.get('savings_amount')) for p in promotions]
+        total_savings = sum(valid_savings)
+        
+        # Best deals with safe comparisons
+        try:
+            best_discount = max(promotions, key=lambda x: self._safe_float(x.get('discount_percentage')))
+            best_savings = max(promotions, key=lambda x: self._safe_float(x.get('savings_amount')))
+            best_value = max(promotions, key=lambda x: self._safe_float(x.get('value_score')))
+        except (ValueError, TypeError):
+            # Fallback if max operations fail
+            best_discount = promotions[0] if promotions else {}
+            best_savings = promotions[0] if promotions else {}
+            best_value = promotions[0] if promotions else {}
         
         # Use LLM for deeper analysis if database handler available
         llm_analysis = {}
@@ -223,41 +255,45 @@ class PromotionFinder:
             except Exception as e:
                 logger.warning(f"LLM analysis failed: {e}")
         
+        # Safe min/max calculations for discount range
+        discount_values = [self._safe_float(p.get('discount_percentage')) for p in promotions]
+        discount_values = [d for d in discount_values if d > 0]
+        
         return {
             "statistics": {
                 "total_promotions": total_promotions,
                 "average_discount": round(avg_discount, 1),
                 "total_potential_savings": round(total_savings, 2),
                 "discount_range": {
-                    "min": min(p.get('discount_percentage', 0) for p in promotions),
-                    "max": max(p.get('discount_percentage', 0) for p in promotions)
+                    "min": min(discount_values) if discount_values else 0,
+                    "max": max(discount_values) if discount_values else 0
                 }
             },
             "highlights": {
                 "best_discount": {
-                    "product": best_discount.get('product_name'),
-                    "store": best_discount.get('store_name'),
-                    "discount": best_discount.get('discount_percentage'),
-                    "price": best_discount.get('current_price')
+                    "product": best_discount.get('product_name', 'Unknown'),
+                    "store": best_discount.get('store_name', 'Unknown'),
+                    "discount": self._safe_float(best_discount.get('discount_percentage')),
+                    "price": self._safe_float(best_discount.get('current_price'))
                 },
                 "biggest_savings": {
-                    "product": best_savings.get('product_name'),
-                    "store": best_savings.get('store_name'),
-                    "savings": best_savings.get('savings_amount'),
-                    "price": best_savings.get('current_price')
+                    "product": best_savings.get('product_name', 'Unknown'),
+                    "store": best_savings.get('store_name', 'Unknown'),
+                    "savings": self._safe_float(best_savings.get('savings_amount')),
+                    "price": self._safe_float(best_savings.get('current_price'))
                 },
                 "best_value": {
-                    "product": best_value.get('product_name'),
-                    "store": best_value.get('store_name'),
-                    "value_score": best_value.get('value_score'),
-                    "price": best_value.get('current_price')
+                    "product": best_value.get('product_name', 'Unknown'),
+                    "store": best_value.get('store_name', 'Unknown'),
+                    "value_score": self._safe_float(best_value.get('value_score')),
+                    "price": self._safe_float(best_value.get('current_price'))
                 }
             },
             **llm_analysis
         }
     
     def _get_category_breakdown(self, promotions: List[Dict]) -> List[Dict]:
-        """Get breakdown of promotions by category"""
+        """Get breakdown of promotions by category with safe calculations"""
         category_stats = {}
         
         for promo in promotions:
@@ -273,27 +309,33 @@ class PromotionFinder:
             
             stats = category_stats[category]
             stats["count"] += 1
-            stats["total_savings"] += promo.get('savings_amount', 0)
+            stats["total_savings"] += self._safe_float(promo.get('savings_amount'))
             
             # Track best deal in category
-            if (stats["best_deal"] is None or 
-                promo.get('discount_percentage', 0) > stats["best_deal"].get('discount_percentage', 0)):
+            current_discount = self._safe_float(promo.get('discount_percentage'))
+            best_discount = self._safe_float(stats["best_deal"].get('discount_percentage') if stats["best_deal"] else 0)
+            
+            if stats["best_deal"] is None or current_discount > best_discount:
                 stats["best_deal"] = promo
         
-        # Calculate averages
+        # Calculate averages with safe math
         for stats in category_stats.values():
             if stats["count"] > 0:
                 # Calculate average discount for this category
                 category_promotions = [p for p in promotions if p.get('ai_main_category') == stats["category"]]
-                stats["avg_discount"] = round(
-                    sum(p.get('discount_percentage', 0) for p in category_promotions) / len(category_promotions), 1
-                )
+                valid_discounts = [self._safe_float(p.get('discount_percentage')) for p in category_promotions]
+                valid_discounts = [d for d in valid_discounts if d > 0]
+                
+                if valid_discounts:
+                    stats["avg_discount"] = round(sum(valid_discounts) / len(valid_discounts), 1)
+                else:
+                    stats["avg_discount"] = 0
         
         # Sort by count descending
         return sorted(category_stats.values(), key=lambda x: x["count"], reverse=True)
     
     def _get_store_breakdown(self, promotions: List[Dict]) -> List[Dict]:
-        """Get breakdown of promotions by store"""
+        """Get breakdown of promotions by store with safe calculations"""
         store_stats = {}
         
         for promo in promotions:
@@ -309,17 +351,22 @@ class PromotionFinder:
             
             stats = store_stats[store]
             stats["count"] += 1
-            stats["total_savings"] += promo.get('savings_amount', 0)
+            stats["total_savings"] += self._safe_float(promo.get('savings_amount'))
             if promo.get('ai_main_category'):
                 stats["categories"].add(promo.get('ai_main_category'))
         
-        # Calculate averages and convert sets to lists
+        # Calculate averages and convert sets to lists with safe math
         for stats in store_stats.values():
             if stats["count"] > 0:
                 store_promotions = [p for p in promotions if p.get('store_name', '').upper() == stats["store"]]
-                stats["avg_discount"] = round(
-                    sum(p.get('discount_percentage', 0) for p in store_promotions) / len(store_promotions), 1
-                )
+                valid_discounts = [self._safe_float(p.get('discount_percentage')) for p in store_promotions]
+                valid_discounts = [d for d in valid_discounts if d > 0]
+                
+                if valid_discounts:
+                    stats["avg_discount"] = round(sum(valid_discounts) / len(valid_discounts), 1)
+                else:
+                    stats["avg_discount"] = 0
+            
             stats["categories"] = list(stats["categories"])
         
         # Sort by count descending
@@ -334,7 +381,12 @@ class PromotionFinder:
                 return "No promotional items are currently available."
         
         total = len(promotions)
-        avg_discount = sum(p.get('discount_percentage', 0) for p in promotions) / total
+        
+        # Safe calculation of average discount
+        valid_discounts = [self._safe_float(p.get('discount_percentage')) for p in promotions]
+        valid_discounts = [d for d in valid_discounts if d > 0]
+        avg_discount = sum(valid_discounts) / len(valid_discounts) if valid_discounts else 0
+        
         stores = len(set(p.get('store_name', '') for p in promotions))
         categories = len(set(p.get('ai_main_category', '') for p in promotions))
         
@@ -346,10 +398,17 @@ class PromotionFinder:
         base_summary += f" across {stores} stores in {categories} categories. "
         base_summary += f"Average discount is {avg_discount:.1f}%."
         
-        # Add best deal highlight
-        best_deal = max(promotions, key=lambda x: x.get('discount_percentage', 0))
-        base_summary += f" Best deal: {best_deal.get('product_name')} at {best_deal.get('store_name', '').upper()} "
-        base_summary += f"with {best_deal.get('discount_percentage')}% off."
+        # Add best deal highlight with safe access
+        try:
+            best_deal = max(promotions, key=lambda x: self._safe_float(x.get('discount_percentage')))
+            discount_pct = self._safe_float(best_deal.get('discount_percentage'))
+            product_name = best_deal.get('product_name', 'Unknown product')
+            store_name = best_deal.get('store_name', 'Unknown store').upper()
+            
+            base_summary += f" Best deal: {product_name} at {store_name} "
+            base_summary += f"with {discount_pct:.0f}% off."
+        except (ValueError, TypeError):
+            base_summary += " Check individual items for best deals."
         
         return base_summary
 
