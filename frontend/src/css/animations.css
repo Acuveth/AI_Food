@@ -1,0 +1,61 @@
+/* frontend/src/css/animations.css - Animations and Keyframes */
+
+/* Keyframe Animations */
+@keyframes typing {
+    0%, 60%, 100% {
+      opacity: 0.3;
+    }
+    30% {
+      opacity: 1;
+    }
+  }
+  
+  @keyframes fadeIn {
+    from {
+      opacity: 0;
+      transform: translateY(10px);
+    }
+    to {
+      opacity: 1;
+      transform: translateY(0);
+    }
+  }
+  
+  @keyframes slideDown {
+    from {
+      opacity: 0;
+      transform: translateY(-20px);
+    }
+    to {
+      opacity: 1;
+      transform: translateY(0);
+    }
+  }
+  
+  @keyframes spin {
+    0% {
+      transform: rotate(0deg);
+    }
+    100% {
+      transform: rotate(360deg);
+    }
+  }
+  
+  /* Animation Classes */
+  .results-container {
+    animation: fadeIn 0.3s ease-out;
+  }
+  
+  .promotion-card,
+  .meal-card,
+  .store-card {
+    animation: fadeIn 0.3s ease-out;
+  }
+  
+  .recipe-container {
+    animation: slideDown 0.3s ease-out;
+  }
+  
+  .grocery-analysis-container {
+    animation: slideDown 0.3s ease-out;
+  }

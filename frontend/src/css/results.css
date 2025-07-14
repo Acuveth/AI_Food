@@ -1,0 +1,86 @@
+/* frontend/src/css/results.css - General Results Container Styles */
+
+.results-container {
+    width: 100%;
+  }
+  
+  .results-container .message-content {
+    margin-bottom: 20px;
+  }
+  
+  .results-container h3 {
+    color: var(--text-primary);
+    font-size: 1.3rem;
+    font-weight: 600;
+    margin-bottom: 8px;
+  }
+  
+  .results-container h4 {
+    color: var(--text-primary);
+    font-size: 1.1rem;
+    font-weight: 500;
+    margin-bottom: 12px;
+  }
+  
+  /* Analysis Summary */
+  .analysis-summary {
+    margin-top: 20px;
+    padding: 20px;
+    background: var(--bg-primary);
+    border-radius: var(--radius);
+    border: 1px solid var(--border-color);
+  }
+  
+  .highlights-grid {
+    display: grid;
+    grid-template-columns: repeat(auto-fit, minmax(200px, 1fr));
+    gap: 16px;
+    margin-top: 15px;
+  }
+  
+  .highlight-card {
+    background: var(--bg-card);
+    padding: 16px;
+    border-radius: var(--radius);
+    border: 1px solid var(--border-color);
+    text-align: center;
+  }
+  
+  .highlight-card strong {
+    color: var(--accent-color);
+    font-size: 0.9rem;
+    font-weight: 600;
+  }
+  
+  .highlight-card p {
+    color: var(--text-secondary);
+    font-size: 0.8rem;
+    margin: 8px 0;
+  }
+  
+  .highlight-value {
+    color: var(--success-color);
+    font-size: 1.2rem;
+    font-weight: 600;
+  }
+  
+  /* Help and Clarification */
+  .help-suggestions,
+  .clarification-questions {
+    margin-top: 20px;
+  }
+  
+  .questions-list {
+    margin: 15px 0;
+    padding: 0;
+  }
+  
+  .question-item {
+    background: var(--bg-card);
+    padding: 12px 16px;
+    margin-bottom: 8px;
+    border-radius: var(--radius);
+    border: 1px solid var(--border-color);
+    color: var(--text-secondary);
+    font-size: 0.9rem;
+  }

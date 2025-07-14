@@ -1,0 +1,111 @@
+/* frontend/src/css/price-comparison.css - Price Comparison Specific Styles */
+
+.price-comparison-grid {
+    display: grid;
+    grid-template-columns: repeat(auto-fill, minmax(250px, 1fr));
+    gap: 16px;
+    margin: 20px 0;
+  }
+  
+  .store-card {
+    background: var(--bg-primary);
+    border: 1px solid var(--border-color);
+    border-radius: var(--radius);
+    padding: 18px;
+    transition: all 0.2s ease;
+  }
+  
+  .store-card:hover {
+    border-color: var(--accent-color);
+  }
+  
+  .store-card.no-products {
+    opacity: 0.6;
+  }
+  
+  .store-card h4 {
+    color: var(--text-primary);
+    font-size: 1.1rem;
+    font-weight: 600;
+    margin-bottom: 12px;
+  }
+  
+  .store-stats p {
+    margin: 6px 0;
+    color: var(--text-secondary);
+    font-size: 0.9rem;
+  }
+  
+  .products-list {
+    margin-top: 12px;
+    border-top: 1px solid var(--border-color);
+    padding-top: 12px;
+  }
+  
+  .product-item {
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    padding: 6px 0;
+    border-bottom: 1px solid rgba(255, 255, 255, 0.05);
+  }
+  
+  .product-item:last-child {
+    border-bottom: none;
+  }
+  
+  .product-name {
+    color: var(--text-primary);
+    font-size: 0.85rem;
+    flex: 1;
+    margin-right: 10px;
+  }
+  
+  .product-price {
+    color: var(--success-color);
+    font-weight: 600;
+    font-size: 0.9rem;
+  }
+  
+  .no-products-message {
+    color: var(--text-muted);
+    font-style: italic;
+    text-align: center;
+    padding: 20px 0;
+  }
+  
+  /* Best Deal Highlight */
+  .best-deal-highlight {
+    margin-top: 20px;
+    padding: 20px;
+    background: linear-gradient(135deg, rgba(16, 185, 129, 0.1) 0%, rgba(79, 70, 229, 0.1) 100%);
+    border-radius: var(--radius);
+    border: 1px solid var(--success-color);
+    text-align: center;
+  }
+  
+  .best-deal-card {
+    background: var(--bg-primary);
+    padding: 16px;
+    border-radius: var(--radius);
+    margin-top: 10px;
+  }
+  
+  .best-deal-card strong {
+    color: var(--text-primary);
+    font-size: 1.1rem;
+    display: block;
+    margin-bottom: 4px;
+  }
+  
+  .best-deal-card p {
+    color: var(--text-secondary);
+    font-size: 0.9rem;
+    margin-bottom: 8px;
+  }
+  
+  .best-price {
+    color: var(--success-color);
+    font-size: 1.6rem;
+    font-weight: 700;
+  }

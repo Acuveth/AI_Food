@@ -1,6 +1,6 @@
 // App.js - Updated with immediate recipe display and background grocery analysis
 import React, { useState, useRef, useEffect } from 'react';
-import './Streamlined.css';
+import './css/index.css';
 
 // Import components
 import ApiService from './services/ApiService';
