@@ -1,0 +1,28 @@
+/* frontend/src/css/index.css - Main CSS Entry Point */
+
+/* Import all CSS modules in the correct order */
+
+/* 1. Variables and base styles first */
+@import './variables.css';
+@import './base.css';
+
+/* 2. Layout and structure */
+@import './layout.css';
+
+/* 3. Core interface components */
+@import './chat.css';
+@import './welcome.css';
+
+/* 4. Results and data display components */
+@import './results.css';
+@import './promotions.css';
+@import './price-comparison.css';
+@import './meals.css';
+@import './grocery-analysis.css';
+@import './recipe-display.css';
+
+/* 5. Animations and effects */
+@import './animations.css';
+
+/* 6. Responsive design (last to override if needed) */
+@import './responsive.css';
