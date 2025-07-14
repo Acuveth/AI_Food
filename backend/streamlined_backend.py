@@ -127,8 +127,14 @@ async def intelligent_request(request: UserInputRequest):
         
         # Step 2: Route to appropriate function based on intent
         if intent == "FIND_PROMOTIONS":
+            # Safely extract search term
+            search_term = entities.get("search_term")
+            if not search_term:
+                items_list = entities.get("items", [])
+                search_term = items_list[0] if items_list and len(items_list) > 0 else None
+            
             result = await find_promotions(
-                search_filter=entities.get("search_term") or entities.get("items", [None])[0],
+                search_filter=search_term,
                 category_filter=entities.get("category"),
                 store_filter=entities.get("store_preference"),
                 min_discount=entities.get("min_discount"),
@@ -252,6 +258,174 @@ async def intelligent_request(request: UserInputRequest):
             message="Failed to process your request",
             approach="error"
         )
+
+
+@app.post("/api/intelligent-request", response_model=APIResponse)
+async def intelligent_request(request: UserInputRequest):
+    """
+    Main intelligent endpoint that interprets user input and routes to appropriate function
+    """
+    try:
+        logger.info(f"🧠 Processing intelligent request: '{request.input}'")
+        
+        # Step 1: Interpret user input
+        interpretation = await interpret_user_input(request.input)
+        
+        if not interpretation.get("intent"):
+            return APIResponse(
+                success=False,
+                error="Failed to interpret user request",
+                message="Could not understand what you're looking for",
+                intent="unclear"
+            )
+        
+        intent = interpretation["intent"]
+        entities = interpretation.get("extracted_entities", {})
+        
+        logger.info(f"🎯 Detected intent: {intent}")
+        
+        # Helper function to safely get search term
+        def get_search_term():
+            search_term = entities.get("search_term")
+            if search_term:
+                return search_term
+            
+            items_list = entities.get("items", [])
+            if items_list and len(items_list) > 0:
+                return items_list[0]
+            
+            return None
+        
+        # Step 2: Route to appropriate function based on intent
+        if intent == "FIND_PROMOTIONS":
+            search_term = get_search_term()
+            
+            result = await find_promotions(
+                search_filter=search_term,
+                category_filter=entities.get("category"),
+                store_filter=entities.get("store_preference"),
+                min_discount=entities.get("min_discount"),
+                max_price=entities.get("max_price")
+            )
+            
+            return APIResponse(
+                success=result["success"],
+                data=result,
+                message=result.get("summary", "Promotions found"),
+                intent=intent,
+                approach="promotion_finder"
+            )
+        
+        elif intent == "COMPARE_ITEM_PRICES":
+            item_name = get_search_term()
+            if not item_name:
+                return APIResponse(
+                    success=False,
+                    error="No item specified for price comparison",
+                    message="Please specify which item you want to compare prices for",
+                    intent=intent
+                )
+            
+            result = await compare_item_prices(
+                item_name=item_name,
+                include_similar=True,
+                max_results_per_store=5
+            )
+            
+            return APIResponse(
+                success=result["success"],
+                data=result,
+                message=result.get("summary", "Price comparison completed"),
+                intent=intent,
+                approach="item_finder"
+            )
+        
+        elif intent == "SEARCH_MEALS":
+            result = await search_meals(
+                user_request=request.input,
+                max_results=20
+            )
+            
+            return APIResponse(
+                success=result["success"],
+                data=result,
+                message=result.get("summary", "Meal search completed"),
+                intent=intent,
+                approach="meal_search"
+            )
+        
+        elif intent == "REVERSE_MEAL_SEARCH":
+            ingredients = entities.get("ingredients", [])
+            if not ingredients:
+                return APIResponse(
+                    success=False,
+                    error="No ingredients specified",
+                    message="Please specify which ingredients you have available",
+                    intent=intent
+                )
+            
+            result = await reverse_meal_search(
+                available_ingredients=ingredients,
+                max_results=10
+            )
+            
+            return APIResponse(
+                success=result["success"],
+                data=result,
+                message=result.get("summary", "Reverse meal search completed"),
+                intent=intent,
+                approach="reverse_meal_search"
+            )
+        
+        elif intent == "GENERAL_QUESTION":
+            return APIResponse(
+                success=True,
+                data={
+                    "response": "I can help you find promotions, compare prices, or search for meals. Try asking something like 'find milk deals', 'compare bread prices', or 'Italian dinner recipes'.",
+                    "suggestions": [
+                        "Find promotional items",
+                        "Compare prices across stores", 
+                        "Search for meal recipes",
+                        "Find meals with your ingredients"
+                    ]
+                },
+                message="General assistance provided",
+                intent=intent,
+                approach="general_help"
+            )
+        
+        else:  # UNCLEAR intent
+            clarification_questions = interpretation.get("clarification_questions", [
+                "What specific product are you looking for?",
+                "Would you like to find deals, compare prices, or get meal suggestions?",
+                "Do you have any store preferences?"
+            ])
+            
+            return APIResponse(
+                success=False,
+                data={
+                    "clarification_questions": clarification_questions,
+                    "suggestions": [
+                        "Try: 'find milk promotions'",
+                        "Try: 'compare cheese prices'",
+                        "Try: 'healthy dinner recipes'",
+                        "Try: 'meals with chicken and rice'"
+                    ]
+                },
+                message="I need more information to help you",
+                intent=intent,
+                approach="clarification_needed"
+            )
+        
+    except Exception as e:
+        logger.error(f"❌ Error processing intelligent request: {e}")
+        return APIResponse(
+            success=False,
+            error=str(e),
+            message="Failed to process your request",
+            approach="error"
+        )
+
 
 # CORE FUNCTION 1: PROMOTION FINDER
 @app.post("/api/promotions", response_model=APIResponse)

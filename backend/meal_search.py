@@ -180,6 +180,162 @@ class MealSearcher:
                 "message": "Failed to search for meals"
             }
     
+    async def get_meal_with_grocery_analysis(self, meal_data: Dict[str, Any]) -> Dict[str, Any]:
+        """
+        Get detailed grocery cost analysis for a specific meal
+        """
+        await self._ensure_db_connection()
+        
+        logger.info(f"🛒 Analyzing grocery costs for meal: {meal_data.get('title', 'Unknown')}")
+        
+        try:
+            # Extract ingredients from meal data
+            ingredients = meal_data.get('ingredients', [])
+            if not ingredients:
+                return {
+                    "success": False,
+                    "message": "No ingredients found in meal data",
+                    "meal": meal_data
+                }
+            
+            # Extract ingredient names for database search
+            ingredient_names = []
+            for ingredient in ingredients:
+                if isinstance(ingredient, dict):
+                    name = ingredient.get('name', '') or ingredient.get('original', '')
+                    if name:
+                        ingredient_names.append(name)
+                elif isinstance(ingredient, str):
+                    ingredient_names.append(ingredient)
+            
+            if not ingredient_names:
+                return {
+                    "success": False,
+                    "message": "Could not extract ingredient names from meal data",
+                    "meal": meal_data
+                }
+            
+            logger.info(f"🔍 Searching for {len(ingredient_names)} ingredients: {ingredient_names[:3]}...")
+            
+            # Find grocery prices for all ingredients
+            ingredient_results = await self.db_handler.find_meal_ingredients(ingredient_names)
+            
+            # Analyze prices by store
+            store_analysis = {}
+            stores = ["dm", "lidl", "mercator", "spar", "tus"]
+            
+            for store in stores:
+                store_analysis[store] = {
+                    "store_name": store.upper(),
+                    "total_cost": 0,
+                    "available_items": 0,
+                    "missing_items": [],
+                    "found_products": [],
+                    "completeness": 0
+                }
+            
+            # Process each ingredient's results
+            combined_cost = 0
+            combined_items = []
+            total_ingredients = len(ingredient_names)
+            
+            for ingredient, products in ingredient_results.items():
+                best_product = None
+                best_price = float('inf')
+                
+                # Find the cheapest option for this ingredient
+                for product in products:
+                    current_price = product.get('current_price', 0) or 0
+                    if current_price > 0 and current_price < best_price:
+                        best_price = current_price
+                        best_product = product
+                
+                if best_product:
+                    combined_cost += best_price
+                    combined_items.append({
+                        "ingredient": ingredient,
+                        "product": best_product,
+                        "price": best_price,
+                        "store": best_product.get('store_name', ''),
+                        "found": True
+                    })
+                    
+                    # Update store analysis
+                    store_name = best_product.get('store_name', '').lower()
+                    if store_name in store_analysis:
+                        store_analysis[store_name]["available_items"] += 1
+                        store_analysis[store_name]["total_cost"] += best_price
+                        store_analysis[store_name]["found_products"].append(best_product)
+                else:
+                    combined_items.append({
+                        "ingredient": ingredient,
+                        "product": None,
+                        "price": 0,
+                        "store": None,
+                        "found": False
+                    })
+                    
+                    # Add to missing items for all stores
+                    for store_data in store_analysis.values():
+                        store_data["missing_items"].append(ingredient)
+            
+            # Calculate completeness percentages
+            for store_data in store_analysis.values():
+                if total_ingredients > 0:
+                    store_data["completeness"] = (store_data["available_items"] / total_ingredients) * 100
+            
+            # Create combined analysis
+            combined_analysis = {
+                "total_cost": round(combined_cost, 2),
+                "items_found": sum(1 for item in combined_items if item["found"]),
+                "items_missing": sum(1 for item in combined_items if not item["found"]),
+                "completeness": (sum(1 for item in combined_items if item["found"]) / total_ingredients * 100) if total_ingredients > 0 else 0,
+                "item_details": combined_items
+            }
+            
+            # Calculate meal statistics
+            servings = meal_data.get('servings', 2) or 2
+            meal_statistics = {
+                "total_ingredients": total_ingredients,
+                "ingredients_found": combined_analysis["items_found"],
+                "cost_per_serving": round(combined_cost / servings, 2) if servings > 0 else 0,
+                "estimated_total": round(combined_cost, 2)
+            }
+            
+            # Generate summary
+            found_percentage = combined_analysis["completeness"]
+            if found_percentage >= 80:
+                summary = f"Found grocery prices for {meal_statistics['ingredients_found']}/{total_ingredients} ingredients. Estimated total cost: €{combined_analysis['total_cost']:.2f} (€{meal_statistics['cost_per_serving']:.2f} per serving)."
+            elif found_percentage >= 50:
+                summary = f"Found prices for {meal_statistics['ingredients_found']}/{total_ingredients} ingredients. Some items may need to be sourced elsewhere. Estimated cost: €{combined_analysis['total_cost']:.2f}."
+            else:
+                summary = f"Only found prices for {meal_statistics['ingredients_found']}/{total_ingredients} ingredients. Many items may need to be sourced elsewhere or substituted."
+            
+            result = {
+                "success": True,
+                "meal": meal_data,
+                "grocery_analysis": {
+                    "ingredient_results": ingredient_results,
+                    "store_analysis": store_analysis,
+                    "combined_analysis": combined_analysis,
+                    "meal_statistics": meal_statistics
+                },
+                "summary": summary
+            }
+            
+            logger.info(f"✅ Grocery analysis complete: {meal_statistics['ingredients_found']}/{total_ingredients} ingredients found, €{combined_analysis['total_cost']:.2f} total cost")
+            return result
+            
+        except Exception as e:
+            logger.error(f"❌ Grocery analysis failed: {e}")
+            return {
+                "success": False,
+                "error": str(e),
+                "meal": meal_data,
+                "message": "Failed to analyze grocery costs"
+            }
+
+
     def _filter_by_dietary_restrictions(self, meals: List[Dict], analysis: Dict) -> List[Dict]:
         """
         Filter meals based on dietary restrictions using ingredient analysis
