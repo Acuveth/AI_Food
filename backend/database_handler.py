@@ -12,6 +12,7 @@ import pymysql
 from openai import OpenAI
 import os
 from dotenv import load_dotenv
+import json
 
 load_dotenv()
 logging.basicConfig(level=logging.INFO)
@@ -331,9 +332,9 @@ class DatabaseHandler:
         # Default fallback with basic variations
         return [item_name, item_name.lower(), item_name.capitalize()]
     
-    # MEAL INGREDIENT OPERATIONS
+ # ENHANCED MEAL INGREDIENT OPERATIONS
     async def find_meal_ingredients(self, ingredients: List[str]) -> Dict[str, List[Dict]]:
-        """Find prices for meal ingredients across stores with Slovenian support"""
+        """Find prices for meal ingredients across stores with LLM-powered Slovenian alternatives"""
         ingredient_results = {}
         
         for ingredient in ingredients:
@@ -343,9 +344,9 @@ class DatabaseHandler:
             ingredient_products = []
             for term in search_terms:
                 query = """
-                SELECT product_name, store_name, current_price, regular_price, 
+                SELECT product_name, store_name, current_price, regular_price,
                        has_discount, ai_main_category, ai_health_score
-                FROM Akcije 
+                FROM unified_products_view
                 WHERE product_name LIKE %s AND current_price > 0
                 ORDER BY current_price ASC
                 LIMIT 12
@@ -362,11 +363,210 @@ class DatabaseHandler:
                     seen.add(key)
                     unique_products.append(product)
             
+            # If no products found in database, use LLM to generate alternatives
+            if not unique_products:
+                logger.info(f"🔍 No database results for '{ingredient}', using LLM for alternatives...")
+                llm_results = await self._web_search_ingredient_fallback(ingredient)
+                unique_products.extend(llm_results)
+            
             ingredient_results[ingredient] = unique_products[:8]  # Top 8 per ingredient
         
         logger.info(f"🛒 Found ingredients for meal: {len(ingredient_results)} ingredients processed")
         return ingredient_results
     
+
+
+    async def _web_search_ingredient_fallback(self, ingredient: str) -> List[Dict]:
+            """
+            Web search fallback for ingredients not found in database
+            Uses LLM to generate Slovenian alternatives dynamically
+            """
+            try:
+                logger.info(f"🔍 No database results for '{ingredient}', generating Slovenian alternatives...")
+                
+                # Use LLM to generate Slovenian alternatives
+                slovenian_alternatives = await self._generate_slovenian_alternatives_with_llm(ingredient)
+                
+                if slovenian_alternatives:
+                    logger.info(f"🇸🇮 Generated Slovenian alternatives for '{ingredient}': {slovenian_alternatives}")
+                    
+                    # Try searching database with these alternatives
+                    found_products = []
+                    for alternative in slovenian_alternatives:
+                        query = """
+                        SELECT product_name, store_name, current_price, regular_price,
+                            has_discount, ai_main_category, ai_health_score
+                        FROM unified_products_view
+                        WHERE product_name LIKE %s AND current_price > 0
+                        ORDER BY current_price ASC
+                        LIMIT 5
+                        """
+                        results = await self.execute_query(query, [f"%{alternative}%"])
+                        for result in results:
+                            result['found_via_alternative'] = alternative
+                            found_products.append(result)
+                    
+                    if found_products:
+                        logger.info(f"✅ Found {len(found_products)} products using Slovenian alternatives")
+                        return found_products
+                    
+                    # If no products found even with alternatives, return suggestions
+                    return [{
+                        'product_name': f"Slovenian alternatives for: {ingredient}",
+                        'store_name': 'llm_suggestion',
+                        'current_price': None,
+                        'regular_price': None,
+                        'has_discount': False,
+                        'ai_main_category': 'llm_generated_alternatives',
+                        'ai_health_score': None,
+                        'web_search_result': True,
+                        'original_ingredient': ingredient,
+                        'slovenian_alternatives': slovenian_alternatives,
+                        'search_suggestions': [
+                            f"Try searching for '{alt}' in Slovenian grocery stores" 
+                            for alt in slovenian_alternatives[:3]
+                        ],
+                        'store_suggestions': [
+                            f"Ask at {store} for '{alt}' or similar products"
+                            for store in ['Mercator', 'Lidl', 'DM', 'SPAR', 'Tuš']
+                            for alt in slovenian_alternatives[:2]
+                        ]
+                    }]
+                
+                return []
+                
+            except Exception as e:
+                logger.error(f"❌ LLM alternative generation failed for '{ingredient}': {e}")
+                return []
+    
+    async def _generate_slovenian_alternatives_with_llm(self, ingredient: str) -> List[str]:
+        """
+        Use LLM to generate Slovenian alternatives for any ingredient
+        """
+        prompt = f"""
+        Generate Slovenian alternatives and translations for this food ingredient: "{ingredient}"
+        
+        Provide:
+        1. Direct Slovenian translation(s)
+        2. Common Slovenian names used in grocery stores
+        3. Regional variations if they exist
+        4. Alternative names or synonyms
+        5. How it might be labeled in Slovenian supermarkets (Mercator, Lidl, DM, SPAR, Tuš)
+        
+        Examples:
+        - "quinoa" → ["kvinoja", "kvinoa", "psevdo žito", "inkovski riž"]
+        - "turmeric" → ["kurkuma", "rumena začimba", "indijski šafran"]
+        - "avocado" → ["avokado", "avokadova hruška", "maslasta hruška"]
+        - "chia seeds" → ["chia semena", "chia", "španska žajbleva semena"]
+        - "coconut milk" → ["kokosovo mleko", "kokosova krema", "kokosov napitek"]
+        
+        IMPORTANT: 
+        - Focus on terms actually used in Slovenian grocery stores
+        - Include variations that might appear on product labels
+        - Consider both formal and colloquial terms
+        - If it's a very exotic ingredient, suggest close alternatives available in Slovenia
+        
+        Respond with JSON array only:
+        ["slovenian_term_1", "slovenian_term_2", "slovenian_term_3", "slovenian_term_4", "slovenian_term_5"]
+        """
+        
+        try:
+            response = await asyncio.get_event_loop().run_in_executor(
+                None,
+                lambda: client.chat.completions.create(
+                    model="gpt-4o-mini",
+                    messages=[{"role": "user", "content": prompt}],
+                    temperature=0.3,
+                    max_tokens=300
+                )
+            )
+            
+            result_text = response.choices[0].message.content.strip()
+            
+            # Parse JSON response
+            try:
+                if "```json" in result_text:
+                    json_text = result_text.split("```json")[1].split("```")[0].strip()
+                else:
+                    json_text = result_text
+                
+                alternatives = json.loads(json_text)
+                
+                # Validate that we got a list of strings
+                if isinstance(alternatives, list):
+                    valid_alternatives = []
+                    for alt in alternatives:
+                        if isinstance(alt, str) and alt.strip():
+                            valid_alternatives.append(alt.strip())
+                    
+                    if valid_alternatives:
+                        logger.info(f"🧠 LLM generated {len(valid_alternatives)} Slovenian alternatives for '{ingredient}'")
+                        return valid_alternatives[:8]  # Max 8 alternatives
+                
+                logger.warning(f"LLM returned invalid format for '{ingredient}': {result_text}")
+                return []
+                
+            except json.JSONDecodeError as e:
+                logger.error(f"Failed to parse LLM response for '{ingredient}': {e}")
+                logger.error(f"Raw response: {result_text}")
+                return []
+                
+        except Exception as e:
+            logger.error(f"LLM alternative generation failed for '{ingredient}': {e}")
+            return []
+    
+    async def _generate_web_search_terms_with_llm(self, ingredient: str, slovenian_alternatives: List[str]) -> List[str]:
+        """
+        Generate web search terms using LLM with Slovenian alternatives
+        """
+        prompt = f"""
+        Generate effective web search terms to find information about this ingredient in Slovenian grocery stores:
+        
+        Original ingredient: "{ingredient}"
+        Slovenian alternatives: {slovenian_alternatives}
+        
+        Create search terms that would help find:
+        1. Where to buy this ingredient in Slovenia
+        2. Which Slovenian stores carry it
+        3. What it's called in Slovenian grocery stores
+        4. Similar or substitute products
+        
+        Focus on searches that would work well for Slovenia.
+        
+        Return 5-8 search terms as JSON array:
+        ["search_term_1", "search_term_2", "search_term_3", "search_term_4", "search_term_5"]
+        """
+        
+        try:
+            response = await asyncio.get_event_loop().run_in_executor(
+                None,
+                lambda: client.chat.completions.create(
+                    model="gpt-4o-mini",
+                    messages=[{"role": "user", "content": prompt}],
+                    temperature=0.3,
+                    max_tokens=300
+                )
+            )
+            
+            result_text = response.choices[0].message.content.strip()
+            
+            if "```json" in result_text:
+                json_text = result_text.split("```json")[1].split("```")[0].strip()
+            else:
+                json_text = result_text
+            
+            search_terms = json.loads(json_text)
+            
+            if isinstance(search_terms, list):
+                valid_terms = [term.strip() for term in search_terms if isinstance(term, str) and term.strip()]
+                return valid_terms[:8]
+            
+            return []
+            
+        except Exception as e:
+            logger.error(f"Web search term generation failed: {e}")
+            return []
+        
     # REVERSE MEAL SEARCH OPERATIONS 
     # TODO TO JE NAROBE
     async def find_meals_by_available_ingredients(self, available_ingredients: List[str]) -> List[Dict]:

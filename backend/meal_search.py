@@ -1,8 +1,7 @@
 #!/usr/bin/env python3
 """
 Enhanced Meal Search Module with Slovenian Language Support
-Addresses issues with vegetarian/vegan meal filtering and API parameter handling
-Enhanced with Slovenian dietary terms and ingredient processing
+FIXED: Null handling issue in meal scoring
 """
 
 import asyncio
@@ -112,159 +111,159 @@ class MealSearcher:
         """Ensure database connection is available"""
         if self.db_handler is None:
             self.db_handler = await get_db_handler()
-    
+
     async def get_meal_with_grocery_analysis(self, meal_data: Dict[str, Any]) -> Dict[str, Any]:
-            """Get detailed grocery cost analysis for a specific meal with Slovenian support"""
-            await self._ensure_db_connection()
-            
-            logger.info(f"🛒 Analiza stroškov nakupovanja za jed: {meal_data.get('title', 'Unknown')}")
-            
-            try:
-                # Extract ingredients from meal data
-                ingredients = meal_data.get('ingredients', [])
-                if not ingredients:
-                    return {
-                        "success": False,
-                        "message": "V podatkih o jedi ni najdenih sestavin",
-                        "meal": meal_data
-                    }
-                
-                # Extract ingredient names for database search
-                ingredient_names = []
-                for ingredient in ingredients:
-                    if isinstance(ingredient, dict):
-                        name = ingredient.get('name', '') or ingredient.get('original', '')
-                        if name:
-                            ingredient_names.append(name)
-                    elif isinstance(ingredient, str):
-                        ingredient_names.append(ingredient)
-                
-                if not ingredient_names:
-                    return {
-                        "success": False,
-                        "message": "Ni bilo mogoče ekstraktirati imen sestavin iz podatkov o jedi",
-                        "meal": meal_data
-                    }
-                
-                logger.info(f"🔍 Iščem {len(ingredient_names)} sestavin: {ingredient_names[:3]}...")
-                
-                # Find grocery prices for all ingredients
-                ingredient_results = await self.db_handler.find_meal_ingredients(ingredient_names)
-                
-                # Analyze prices by store
-                store_analysis = {}
-                stores = ["dm", "lidl", "mercator", "spar", "tus"]
-                
-                for store in stores:
-                    store_analysis[store] = {
-                        "store_name": store.upper(),
-                        "total_cost": 0,
-                        "available_items": 0,
-                        "missing_items": [],
-                        "found_products": [],
-                        "completeness": 0
-                    }
-                
-                # Process each ingredient's results
-                combined_cost = 0
-                combined_items = []
-                total_ingredients = len(ingredient_names)
-                
-                for ingredient, products in ingredient_results.items():
-                    best_product = None
-                    best_price = float('inf')
-                    
-                    # Find the cheapest option for this ingredient
-                    for product in products:
-                        current_price = product.get('current_price', 0) or 0
-                        if current_price > 0 and current_price < best_price:
-                            best_price = current_price
-                            best_product = product
-                    
-                    if best_product:
-                        combined_cost += best_price
-                        combined_items.append({
-                            "ingredient": ingredient,
-                            "product": best_product,
-                            "price": best_price,
-                            "store": best_product.get('store_name', ''),
-                            "found": True
-                        })
-                        
-                        # Update store analysis
-                        store_name = best_product.get('store_name', '').lower()
-                        if store_name in store_analysis:
-                            store_analysis[store_name]["available_items"] += 1
-                            store_analysis[store_name]["total_cost"] += best_price
-                            store_analysis[store_name]["found_products"].append(best_product)
-                    else:
-                        combined_items.append({
-                            "ingredient": ingredient,
-                            "product": None,
-                            "price": 0,
-                            "store": None,
-                            "found": False
-                        })
-                        
-                        # Add to missing items for all stores
-                        for store_data in store_analysis.values():
-                            store_data["missing_items"].append(ingredient)
-                
-                # Calculate completeness percentages
-                for store_data in store_analysis.values():
-                    if total_ingredients > 0:
-                        store_data["completeness"] = (store_data["available_items"] / total_ingredients) * 100
-                
-                # Create combined analysis
-                combined_analysis = {
-                    "total_cost": round(combined_cost, 2),
-                    "items_found": sum(1 for item in combined_items if item["found"]),
-                    "items_missing": sum(1 for item in combined_items if not item["found"]),
-                    "completeness": (sum(1 for item in combined_items if item["found"]) / total_ingredients * 100) if total_ingredients > 0 else 0,
-                    "item_details": combined_items
-                }
-                
-                # Calculate meal statistics
-                servings = meal_data.get('servings', 2) or 2
-                meal_statistics = {
-                    "total_ingredients": total_ingredients,
-                    "ingredients_found": combined_analysis["items_found"],
-                    "cost_per_serving": round(combined_cost / servings, 2) if servings > 0 else 0,
-                    "estimated_total": round(combined_cost, 2)
-                }
-                
-                # Generate summary in Slovenian
-                found_percentage = combined_analysis["completeness"]
-                if found_percentage >= 80:
-                    summary = f"Najdene cene živil za {meal_statistics['ingredients_found']}/{total_ingredients} sestavin. Ocenjeni skupni strošek: €{combined_analysis['total_cost']:.2f} (€{meal_statistics['cost_per_serving']:.2f} na porcijo)."
-                elif found_percentage >= 50:
-                    summary = f"Najdene cene za {meal_statistics['ingredients_found']}/{total_ingredients} sestavin. Nekatere izdelke boste morda morali kupiti drugje. Ocenjeni strošek: €{combined_analysis['total_cost']:.2f}."
-                else:
-                    summary = f"Najdene cene samo za {meal_statistics['ingredients_found']}/{total_ingredients} sestavin. Mnoge izdelke boste morda morali kupiti drugje ali nadomestiti."
-                
-                result = {
-                    "success": True,
-                    "meal": meal_data,
-                    "grocery_analysis": {
-                        "ingredient_results": ingredient_results,
-                        "store_analysis": store_analysis,
-                        "combined_analysis": combined_analysis,
-                        "meal_statistics": meal_statistics
-                    },
-                    "summary": summary
-                }
-                
-                logger.info(f"✅ Analiza nakupovanja dokončana: {meal_statistics['ingredients_found']}/{total_ingredients} sestavin najdenih, €{combined_analysis['total_cost']:.2f} skupni strošek")
-                return result
-                
-            except Exception as e:
-                logger.error(f"❌ Analiza nakupovanja ni uspela: {e}")
+        """Get detailed grocery cost analysis for a specific meal with Slovenian support"""
+        await self._ensure_db_connection()
+        
+        logger.info(f"🛒 Analiza stroškov nakupovanja za jed: {meal_data.get('title', 'Unknown')}")
+        
+        try:
+            # Extract ingredients from meal data
+            ingredients = meal_data.get('ingredients', [])
+            if not ingredients:
                 return {
                     "success": False,
-                    "error": str(e),
-                    "meal": meal_data,
-                    "message": "Analiza stroškov nakupovanja ni uspela"
+                    "message": "V podatkih o jedi ni najdenih sestavin",
+                    "meal": meal_data
                 }
+            
+            # Extract ingredient names for database search
+            ingredient_names = []
+            for ingredient in ingredients:
+                if isinstance(ingredient, dict):
+                    name = ingredient.get('name', '') or ingredient.get('original', '')
+                    if name:
+                        ingredient_names.append(name)
+                elif isinstance(ingredient, str):
+                    ingredient_names.append(ingredient)
+            
+            if not ingredient_names:
+                return {
+                    "success": False,
+                    "message": "Ni bilo mogoče ekstraktirati imen sestavin iz podatkov o jedi",
+                    "meal": meal_data
+                }
+            
+            logger.info(f"🔍 Iščem {len(ingredient_names)} sestavin: {ingredient_names[:3]}...")
+            
+            # Find grocery prices for all ingredients
+            ingredient_results = await self.db_handler.find_meal_ingredients(ingredient_names)
+            
+            # Analyze prices by store
+            store_analysis = {}
+            stores = ["dm", "lidl", "mercator", "spar", "tus"]
+            
+            for store in stores:
+                store_analysis[store] = {
+                    "store_name": store.upper(),
+                    "total_cost": 0,
+                    "available_items": 0,
+                    "missing_items": [],
+                    "found_products": [],
+                    "completeness": 0
+                }
+            
+            # Process each ingredient's results
+            combined_cost = 0
+            combined_items = []
+            total_ingredients = len(ingredient_names)
+            
+            for ingredient, products in ingredient_results.items():
+                best_product = None
+                best_price = float('inf')
+                
+                # Find the cheapest option for this ingredient
+                for product in products:
+                    current_price = product.get('current_price', 0) or 0
+                    if current_price > 0 and current_price < best_price:
+                        best_price = current_price
+                        best_product = product
+                
+                if best_product:
+                    combined_cost += best_price
+                    combined_items.append({
+                        "ingredient": ingredient,
+                        "product": best_product,
+                        "price": best_price,
+                        "store": best_product.get('store_name', ''),
+                        "found": True
+                    })
+                    
+                    # Update store analysis
+                    store_name = best_product.get('store_name', '').lower()
+                    if store_name in store_analysis:
+                        store_analysis[store_name]["available_items"] += 1
+                        store_analysis[store_name]["total_cost"] += best_price
+                        store_analysis[store_name]["found_products"].append(best_product)
+                else:
+                    combined_items.append({
+                        "ingredient": ingredient,
+                        "product": None,
+                        "price": 0,
+                        "store": None,
+                        "found": False
+                    })
+                    
+                    # Add to missing items for all stores
+                    for store_data in store_analysis.values():
+                        store_data["missing_items"].append(ingredient)
+            
+            # Calculate completeness percentages
+            for store_data in store_analysis.values():
+                if total_ingredients > 0:
+                    store_data["completeness"] = (store_data["available_items"] / total_ingredients) * 100
+            
+            # Create combined analysis
+            combined_analysis = {
+                "total_cost": round(combined_cost, 2),
+                "items_found": sum(1 for item in combined_items if item["found"]),
+                "items_missing": sum(1 for item in combined_items if not item["found"]),
+                "completeness": (sum(1 for item in combined_items if item["found"]) / total_ingredients * 100) if total_ingredients > 0 else 0,
+                "item_details": combined_items
+            }
+            
+            # Calculate meal statistics
+            servings = meal_data.get('servings', 2) or 2
+            meal_statistics = {
+                "total_ingredients": total_ingredients,
+                "ingredients_found": combined_analysis["items_found"],
+                "cost_per_serving": round(combined_cost / servings, 2) if servings > 0 else 0,
+                "estimated_total": round(combined_cost, 2)
+            }
+            
+            # Generate summary in Slovenian
+            found_percentage = combined_analysis["completeness"]
+            if found_percentage >= 80:
+                summary = f"Najdene cene živil za {meal_statistics['ingredients_found']}/{total_ingredients} sestavin. Ocenjeni skupni strošek: €{combined_analysis['total_cost']:.2f} (€{meal_statistics['cost_per_serving']:.2f} na porcijo)."
+            elif found_percentage >= 50:
+                summary = f"Najdene cene za {meal_statistics['ingredients_found']}/{total_ingredients} sestavin. Nekatere izdelke boste morda morali kupiti drugje. Ocenjeni strošek: €{combined_analysis['total_cost']:.2f}."
+            else:
+                summary = f"Najdene cene samo za {meal_statistics['ingredients_found']}/{total_ingredients} sestavin. Mnoge izdelke boste morda morali kupiti drugje ali nadomestiti."
+            
+            result = {
+                "success": True,
+                "meal": meal_data,
+                "grocery_analysis": {
+                    "ingredient_results": ingredient_results,
+                    "store_analysis": store_analysis,
+                    "combined_analysis": combined_analysis,
+                    "meal_statistics": meal_statistics
+                },
+                "summary": summary
+            }
+            
+            logger.info(f"✅ Analiza nakupovanja dokončana: {meal_statistics['ingredients_found']}/{total_ingredients} sestavin najdenih, €{combined_analysis['total_cost']:.2f} skupni strošek")
+            return result
+            
+        except Exception as e:
+            logger.error(f"❌ Analiza nakupovanja ni uspela: {e}")
+            return {
+                "success": False,
+                "error": str(e),
+                "meal": meal_data,
+                "message": "Analiza stroškov nakupovanja ni uspela"
+            }
     
     # REVERSE MEAL SEARCH METHODS
     async def reverse_meal_search(self, available_ingredients: List[str], max_results: int = 10) -> Dict[str, Any]:
@@ -620,125 +619,125 @@ class MealSearcher:
 
 
     async def _search_spoonacular(self, session: aiohttp.ClientSession, analysis: Dict, max_results: int) -> List[Dict]:
-            """Enhanced Spoonacular search with Slovenian dietary restriction handling"""
-            if not self.apis["spoonacular"]["enabled"]:
-                return []
+        """Enhanced Spoonacular search with Slovenian dietary restriction handling"""
+        if not self.apis["spoonacular"]["enabled"]:
+            return []
+        
+        try:
+            params = {
+                "apiKey": self.apis["spoonacular"]["api_key"],
+                "number": max_results,
+                "addRecipeInformation": "true",
+                "fillIngredients": "true"
+            }
             
-            try:
-                params = {
-                    "apiKey": self.apis["spoonacular"]["api_key"],
-                    "number": max_results,
-                    "addRecipeInformation": "true",
-                    "fillIngredients": "true"
+            # Build query with Slovenian support
+            query_parts = []
+            if analysis.get("english_query"):
+                query_parts.append(analysis["english_query"])
+            
+            # Add meal type to query with Slovenian conversion
+            meal_type = analysis.get("meal_type", "")
+            slovenian_to_english_meals = {
+                "zajtrk": "breakfast",
+                "kosilo": "lunch",
+                "večerja": "dinner",
+                "malica": "snack",
+                "sladica": "dessert"
+            }
+            
+            if meal_type in slovenian_to_english_meals:
+                meal_type = slovenian_to_english_meals[meal_type]
+            
+            if meal_type and meal_type != "any":
+                query_parts.append(meal_type)
+            
+            if query_parts:
+                params["query"] = " ".join(query_parts)
+            
+            # Add dietary restrictions - crucial for Slovenian terms!
+            dietary_restrictions = analysis.get("dietary_restrictions", [])
+            if dietary_restrictions:
+                # Convert Slovenian dietary terms to Spoonacular format
+                diet_map = {
+                    "vegetarian": "vegetarian",
+                    "vegetarijansko": "vegetarian",
+                    "vegan": "vegan",
+                    "veganski": "vegan",
+                    "gluten-free": "gluten free",
+                    "brez glutena": "gluten free",
+                    "ketogenic": "ketogenic",
+                    "keto": "ketogenic",
+                    "paleo": "paleo",
+                    "healthy": "whole30",
+                    "zdravo": "whole30"
                 }
                 
-                # Build query with Slovenian support
-                query_parts = []
-                if analysis.get("english_query"):
-                    query_parts.append(analysis["english_query"])
+                for diet in dietary_restrictions:
+                    diet_lower = diet.lower()
+                    if diet_lower in diet_map:
+                        params["diet"] = diet_map[diet_lower]
+                        logger.info(f"🥄 Spoonacular diet filter: {diet_map[diet_lower]}")
+                        break
                 
-                # Add meal type to query with Slovenian conversion
-                meal_type = analysis.get("meal_type", "")
-                slovenian_to_english_meals = {
-                    "zajtrk": "breakfast",
-                    "kosilo": "lunch",
-                    "večerja": "dinner",
-                    "malica": "snack",
-                    "sladica": "dessert"
+                # Also add as intolerances for stricter filtering
+                intolerance_map = {
+                    "gluten-free": "gluten",
+                    "brez glutena": "gluten",
+                    "dairy-free": "dairy",
+                    "brez mleka": "dairy"
                 }
                 
-                if meal_type in slovenian_to_english_meals:
-                    meal_type = slovenian_to_english_meals[meal_type]
+                intolerances = []
+                for diet in dietary_restrictions:
+                    diet_lower = diet.lower()
+                    if diet_lower in intolerance_map:
+                        intolerances.append(intolerance_map[diet_lower])
                 
-                if meal_type and meal_type != "any":
-                    query_parts.append(meal_type)
+                if intolerances:
+                    params["intolerances"] = ",".join(intolerances)
+            
+            # Add time constraint - FIXED NULL HANDLING
+            if analysis.get("max_cook_time"):
+                params["maxReadyTime"] = analysis["max_cook_time"]
+            
+            # Add cuisine filter with Slovenian conversion
+            cuisine_types = analysis.get("cuisine_types", [])
+            if cuisine_types:
+                cuisine_map = {
+                    "italijanska": "italian",
+                    "kitajska": "chinese",
+                    "mehiška": "mexican",
+                    "indijska": "indian",
+                    "slovenska": "eastern european",
+                    "mediteranska": "mediterranean",
+                    "azijska": "asian"
+                }
                 
-                if query_parts:
-                    params["query"] = " ".join(query_parts)
-                
-                # Add dietary restrictions - crucial for Slovenian terms!
-                dietary_restrictions = analysis.get("dietary_restrictions", [])
-                if dietary_restrictions:
-                    # Convert Slovenian dietary terms to Spoonacular format
-                    diet_map = {
-                        "vegetarian": "vegetarian",
-                        "vegetarijansko": "vegetarian",
-                        "vegan": "vegan",
-                        "veganski": "vegan",
-                        "gluten-free": "gluten free",
-                        "brez glutena": "gluten free",
-                        "ketogenic": "ketogenic",
-                        "keto": "ketogenic",
-                        "paleo": "paleo",
-                        "healthy": "whole30",
-                        "zdravo": "whole30"
-                    }
+                cuisine = cuisine_types[0].lower()
+                if cuisine in cuisine_map:
+                    params["cuisine"] = cuisine_map[cuisine]
+                else:
+                    params["cuisine"] = cuisine
+            
+            logger.info(f"🥄 Spoonacular params: {params}")
+            
+            async with session.get(f"{self.apis['spoonacular']['base_url']}/complexSearch", params=params) as response:
+                if response.status == 200:
+                    data = await response.json()
+                    meals = []
+                    for recipe in data.get("results", []):
+                        meal = self._parse_spoonacular_recipe(recipe)
+                        if meal:
+                            meals.append(meal)
+                    return meals
+                else:
+                    logger.warning(f"Spoonacular API error: {response.status}")
+                    return []
                     
-                    for diet in dietary_restrictions:
-                        diet_lower = diet.lower()
-                        if diet_lower in diet_map:
-                            params["diet"] = diet_map[diet_lower]
-                            logger.info(f"🥄 Spoonacular diet filter: {diet_map[diet_lower]}")
-                            break
-                    
-                    # Also add as intolerances for stricter filtering
-                    intolerance_map = {
-                        "gluten-free": "gluten",
-                        "brez glutena": "gluten",
-                        "dairy-free": "dairy",
-                        "brez mleka": "dairy"
-                    }
-                    
-                    intolerances = []
-                    for diet in dietary_restrictions:
-                        diet_lower = diet.lower()
-                        if diet_lower in intolerance_map:
-                            intolerances.append(intolerance_map[diet_lower])
-                    
-                    if intolerances:
-                        params["intolerances"] = ",".join(intolerances)
-                
-                # Add time constraint
-                if analysis.get("max_cook_time"):
-                    params["maxReadyTime"] = analysis["max_cook_time"]
-                
-                # Add cuisine filter with Slovenian conversion
-                cuisine_types = analysis.get("cuisine_types", [])
-                if cuisine_types:
-                    cuisine_map = {
-                        "italijanska": "italian",
-                        "kitajska": "chinese",
-                        "mehiška": "mexican",
-                        "indijska": "indian",
-                        "slovenska": "eastern european",
-                        "mediteranska": "mediterranean",
-                        "azijska": "asian"
-                    }
-                    
-                    cuisine = cuisine_types[0].lower()
-                    if cuisine in cuisine_map:
-                        params["cuisine"] = cuisine_map[cuisine]
-                    else:
-                        params["cuisine"] = cuisine
-                
-                logger.info(f"🥄 Spoonacular params: {params}")
-                
-                async with session.get(f"{self.apis['spoonacular']['base_url']}/complexSearch", params=params) as response:
-                    if response.status == 200:
-                        data = await response.json()
-                        meals = []
-                        for recipe in data.get("results", []):
-                            meal = self._parse_spoonacular_recipe(recipe)
-                            if meal:
-                                meals.append(meal)
-                        return meals
-                    else:
-                        logger.warning(f"Spoonacular API error: {response.status}")
-                        return []
-                        
-            except Exception as e:
-                logger.error(f"Spoonacular search failed: {e}")
-                return []    
+        except Exception as e:
+            logger.error(f"Spoonacular search failed: {e}")
+            return []    
 
 
     async def _search_edamam(self, session: aiohttp.ClientSession, analysis: Dict, max_results: int) -> List[Dict]:
@@ -1165,15 +1164,15 @@ class MealSearcher:
         return [meal for score, meal in scored_meals]
     
     def _calculate_meal_score(self, meal: Dict, analysis: Dict) -> float:
-        """Calculate relevance score for a meal"""
+        """Calculate relevance score for a meal - FIXED NULL HANDLING"""
         score = 0.0
         
         # Base score for having a meal
         score += 1.0
         
-        # Time preferences
+        # Time preferences - FIXED: Handle None values properly
         total_time = (meal.get("prep_time", 0) or 0) + (meal.get("cook_time", 0) or 0)
-        max_time = analysis.get("max_cook_time", 60)
+        max_time = analysis.get("max_cook_time") or 60  # Fixed: Use 'or' instead of get() with default
         
         if total_time <= max_time:
             score += 2.0
@@ -1392,7 +1391,7 @@ class MealSearcher:
                 "meal_type": meal_type,
                 "cuisine_types": [],
                 "dietary_restrictions": dietary_restrictions,
-                "max_cook_time": 60,
+                "max_cook_time": 60,  # Default value instead of None
                 "servings": 2,
                 "included_ingredients": [],
                 "excluded_ingredients": [],
@@ -1401,9 +1400,6 @@ class MealSearcher:
                 "search_keywords": [user_request],
                 "english_query": user_request
             }
-    
-    # Keep all existing API search methods and helper functions...
-    # (The existing methods remain unchanged)
     
     def _generate_meal_search_summary(self, user_request: str, meals: List[Dict], analysis: Dict) -> str:
         """Generate summary of meal search results in Slovenian"""
@@ -1439,10 +1435,6 @@ class MealSearcher:
         summary += "."
         
         return summary
-    
-    # [Keep all existing API search methods unchanged - _search_spoonacular, _search_edamam, _search_themealdb, etc.]
-    # [Keep all existing parsing methods unchanged - _parse_spoonacular_recipe, _parse_edamam_recipe, etc.]
-    # [Keep all existing helper methods unchanged - _estimate_nutrition, etc.]
 
 # Global meal searcher instance  
 meal_searcher = MealSearcher()
