@@ -73,9 +73,9 @@ class PromotionFinder:
             query = """
             SELECT product_name, store_name, current_price, regular_price, 
                    discount_percentage, ai_main_category, ai_subcategory,
-                   ai_health_score, ai_nutrition_grade
-            FROM unified_products_view 
-            WHERE has_discount = 1 AND current_price > 0
+                   ai_health_score
+            FROM Akcije
+            WHERE current_price > 0
             """
             params = []
             

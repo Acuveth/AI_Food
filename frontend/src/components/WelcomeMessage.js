@@ -1,24 +1,27 @@
-// components/WelcomeMessage.js
+// components/WelcomeMessage.js - Slovenian Language Support
 import React from 'react';
 
 const WelcomeMessage = ({ onSuggestionClick }) => {
   const quickSuggestions = [
-    "Find milk promotions",
-    "Compare bread prices across stores",
-    "Healthy Italian dinner recipes",
-    "Meals I can make with chicken and rice",
-    "Vegetarian lunch ideas",
-    "Cheapest pasta options"
+    // Mix of Slovenian and English suggestions
+    "Najdi akcije za mleko",
+    "Primerjaj cene kruha v trgovinah",
+    "Zdravi italijanski recepti za večerjo",
+    "Kaj lahko skuham s piščancem in rižem",
+    "Vegetarijski recepti za kosilo",
+    "Kje najceneje kupim testenine",
+    "Find cheese promotions",
+    "Veganski recepti za zajtrk",
+    "Akcije za sadje in zelenjavo",
+    "Kaj pripravi iz krompirja",
+    "Cheap organic products",
+    "Recepti brez glutena"
   ];
 
   return (
     <div className="welcome-message">
-      <div className="welcome-avatar">🛒</div>
-      <h3>How can I help you today?</h3>
-      <p>I can find promotions, compare prices across stores, or help you discover meals with grocery cost analysis.</p>
-      
       <div className="quick-suggestions">
-        <h4>Try asking:</h4>
+        <h4>Poskusite vprašati:</h4>
         <div className="suggestions-grid">
           {quickSuggestions.map((suggestion, index) => (
             <button

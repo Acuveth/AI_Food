@@ -1,4 +1,4 @@
-// App.js - Updated with immediate recipe display and background grocery analysis
+// App.js - Updated with Slovenian language support
 import React, { useState, useRef, useEffect } from 'react';
 import './css/index.css';
 
@@ -46,7 +46,7 @@ function App() {
       if (response.success) {
         const botMessage = {
           role: 'assistant',
-          content: response.message || 'Here are your results:',
+          content: response.message || 'Tukaj so vaši rezultati:',
           data: response.data,
           intent: response.intent,
           approach: response.approach,
@@ -57,7 +57,7 @@ function App() {
       } else {
         const errorMessage = {
           role: 'assistant',
-          content: response.message || 'Sorry, I could not process your request.',
+          content: response.message || 'Oprostite, ne morem obdelati vaše zahteve.',
           error: true,
           data: response.data,
           timestamp: new Date()
@@ -68,7 +68,7 @@ function App() {
     } catch (error) {
       const errorMessage = {
         role: 'assistant',
-        content: `Connection error: ${error.message}`,
+        content: `Napaka pri povezavi: ${error.message}`,
         error: true,
         timestamp: new Date()
       };
@@ -80,10 +80,10 @@ function App() {
   };
 
   const handleMealSelect = async (meal) => {
-    // Show generic loading message immediately
+    // Show generic loading message immediately in Slovenian
     const loadingMessage = {
       role: 'assistant',
-      content: `Finding grocery prices...`,
+      content: `Iščem cene živil...`,
       timestamp: new Date(),
       isLoading: true
     };
@@ -100,7 +100,7 @@ function App() {
         if (response.success) {
           const groceryMessage = {
             role: 'assistant',
-            content: `Here's the grocery cost analysis for ${meal.title}:`,
+            content: `Tukaj je analiza stroškov nakupovanja za ${meal.title}:`,
             data: response.data,
             intent: 'meal_grocery_analysis',
             approach: 'meal_grocery_analysis',
@@ -111,7 +111,7 @@ function App() {
         } else {
           const errorMessage = {
             role: 'assistant',
-            content: `Failed to analyze grocery costs for ${meal.title}. ${response.message || ''}`,
+            content: `Analiza stroškov nakupovanja za ${meal.title} ni uspela. ${response.message || ''}`,
             error: true,
             timestamp: new Date()
           };
@@ -125,7 +125,7 @@ function App() {
         const filtered = prev.filter(msg => !msg.isLoading);
         const errorMessage = {
           role: 'assistant',
-          content: `Error analyzing grocery costs for ${meal.title}: ${error.message}`,
+          content: `Napaka pri analizi stroškov nakupovanja za ${meal.title}: ${error.message}`,
           error: true,
           timestamp: new Date()
         };
@@ -138,8 +138,8 @@ function App() {
   return (
     <div className="App">
       <header className="app-header">
-        <h1>🛒 Grocery Intelligence</h1>
-        <p>Smart grocery shopping for Slovenia - Find deals, compare prices, discover meals</p>
+        <h1>🛒 Pameten Nakup</h1>
+        <p>Inteligentno nakupovanje živil za Slovenijo - Najdite akcije, primerjajte cene, odkrijte recepte</p>
       </header>
 
       <main className="main-content">
@@ -185,6 +185,9 @@ function App() {
                       <span></span>
                       <span></span>
                     </div>
+                    <p style={{ marginTop: '10px', fontSize: '0.9rem', color: 'var(--text-muted)' }}>
+                      Razmišljam...
+                    </p>
                   </div>
                 </div>
               </div>
@@ -203,7 +206,7 @@ function App() {
       </main>
 
       <footer className="app-footer">
-        <p>© 2024 Grocery Intelligence - Streamlined Architecture</p>
+        <p>© 2024 Pameten Nakup - Optimizirana arhitektura za slovenskega uporabnika</p>
       </footer>
     </div>
   );

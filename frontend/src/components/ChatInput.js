@@ -1,4 +1,4 @@
-// components/ChatInput.js
+// components/ChatInput.js - Slovenian Language Support
 import React from 'react';
 
 const ChatInput = ({ 
@@ -15,6 +15,9 @@ const ChatInput = ({
     }
   };
 
+  // Slovenian placeholder text
+  const placeholderText = "Vprašajte me karkoli o živilih, cenah ali receptih...";
+
   return (
     <div className="chat-input">
       <div className="input-container">
@@ -24,7 +27,7 @@ const ChatInput = ({
           value={inputValue}
           onChange={(e) => setInputValue(e.target.value)}
           onKeyPress={handleKeyPress}
-          placeholder="Ask me anything about groceries, prices, or meals..."
+          placeholder={placeholderText}
           disabled={loading}
           maxLength={500}
         />
@@ -34,11 +37,13 @@ const ChatInput = ({
             className="send-button"
             onClick={onSendMessage}
             disabled={loading || !inputValue.trim()}
+            title={loading ? "Pošiljam..." : "Pošlji sporočilo"}
           >
             {loading ? '⏳' : '→'}
           </button>
         </div>
       </div>
+    
     </div>
   );
 };
