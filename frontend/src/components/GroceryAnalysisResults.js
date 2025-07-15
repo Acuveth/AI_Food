@@ -1,4 +1,4 @@
-// components/GroceryAnalysisResults.js
+// components/GroceryAnalysisResults.js - Fixed
 import React from 'react';
 
 const GroceryAnalysisResults = ({ data }) => {

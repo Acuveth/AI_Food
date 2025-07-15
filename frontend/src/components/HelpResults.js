@@ -1,4 +1,4 @@
-// components/HelpResults.js - Slovenian Language Support
+// components/HelpResults.js - Fixed exports
 import React from 'react';
 
 // General Help Results Component
