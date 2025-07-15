@@ -93,11 +93,14 @@ async def llm_validate_response(
     try:
         logger.info(f"🤖 LLM validating response for: '{user_input[:50]}...'")
         
+        print(standard_result)
         # Use the LLM validator
         validated_result = await validate_output(user_input, standard_result)
+       
         
         # Log if any changes were made
         if validated_result != standard_result:
+            print(validated_result)
             logger.info(f"🔧 LLM improved the response")
         else:
             logger.info(f"✅ LLM approved response as-is")
@@ -260,6 +263,197 @@ async def intelligent_request(request: UserInputRequest):
             error=str(e),
             message=get_slovenian_message("error")
         )
+
+@app.get("/api/promotions/all")
+async def get_promotions_endpoint(search: Optional[str] = Query(None)):
+    """
+    Direktni endpoint za akcije (kompatibilnost z frontend)
+    """
+    try:
+        search_query = search or "najdi akcije"
+        if search:
+            search_query = f"najdi akcije {search}"
+        
+        logger.info(f"🏷️ Direct promotions request: {search_query}")
+        print(f"\n🏷️ PROMOTIONS ENDPOINT REQUEST: '{search_query}'")
+        
+        # Get standard result
+        standard_result = await find_promotions(search_filter=search)
+        
+        # LLM validate with debug output
+        validated_result = await llm_validate_response(search_query, standard_result)
+        
+        return APIResponse(
+            success=validated_result["success"],
+            data=validated_result,
+            message=validated_result.get("summary", "Akcije najdene"),
+            approach="promotions_direct_llm_validated"
+        )
+        
+    except Exception as e:
+        logger.error(f"❌ Napaka pri iskanju akcij: {e}")
+        return APIResponse(
+            success=False,
+            error=str(e),
+            message="Napaka pri iskanju akcij"
+        )
+
+@app.get("/api/compare-prices/{item_name}")
+async def compare_prices_endpoint(item_name: str):
+    """
+    Direktni endpoint za primerjavo cen (kompatibilnost z frontend)
+    """
+    try:
+        search_query = f"primerjaj cene {item_name}"
+        
+        logger.info(f"🔍 Direct price comparison request: {search_query}")
+        print(f"\n🔍 PRICE COMPARISON ENDPOINT REQUEST: '{search_query}'")
+        
+        # Get standard result
+        standard_result = await compare_item_prices(item_name=item_name)
+        
+        # LLM validate with debug output
+        validated_result = await llm_validate_response(search_query, standard_result)
+        
+        return APIResponse(
+            success=validated_result["success"],
+            data=validated_result,
+            message=validated_result.get("summary", "Primerjava cen dokončana"),
+            approach="price_comparison_direct_llm_validated"
+        )
+        
+    except Exception as e:
+        logger.error(f"❌ Napaka pri primerjavi cen: {e}")
+        return APIResponse(
+            success=False,
+            error=str(e),
+            message="Napaka pri primerjavi cen"
+        )
+
+@app.post("/api/search-meals")
+async def search_meals_endpoint(request: dict):
+    """
+    Direktni endpoint za iskanje jedi (kompatibilnost z frontend)
+    """
+    try:
+        user_request = request.get("request", "")
+        if not user_request:
+            return APIResponse(
+                success=False,
+                error="Ni zahteve za iskanje jedi",
+                message="Potrebna je zahteva za iskanje jedi"
+            )
+        
+        logger.info(f"🍽️ Direct meal search request: {user_request}")
+        print(f"\n🍽️ MEAL SEARCH ENDPOINT REQUEST: '{user_request}'")
+        
+        # Get standard result
+        standard_result = await search_meals(user_request=user_request)
+        
+        # LLM validate with debug output
+        validated_result = await llm_validate_response(user_request, standard_result)
+        
+        return APIResponse(
+            success=validated_result["success"],
+            data=validated_result,
+            message=validated_result.get("summary", "Iskanje jedi dokončano"),
+            approach="meal_search_direct_llm_validated"
+        )
+        
+    except Exception as e:
+        logger.error(f"❌ Napaka pri iskanju jedi: {e}")
+        return APIResponse(
+            success=False,
+            error=str(e),
+            message="Napaka pri iskanju jedi"
+        )
+
+@app.post("/api/meals-from-ingredients")
+async def meals_from_ingredients_endpoint(request: dict):
+    """
+    Direktni endpoint za iskanje jedi iz sestavin (kompatibilnost z frontend)
+    """
+    try:
+        ingredients = request.get("ingredients", [])
+        if not ingredients:
+            return APIResponse(
+                success=False,
+                error="Ni sestavin",
+                message="Potrebne so sestavine za iskanje jedi"
+            )
+        
+        # Create a natural language query
+        ingredients_str = ", ".join(ingredients)
+        search_query = f"kaj lahko skuham z {ingredients_str}"
+        
+        logger.info(f"🥗 Direct reverse meal search request: {search_query}")
+        print(f"\n🥗 REVERSE MEAL SEARCH ENDPOINT REQUEST: '{search_query}'")
+        
+        # Get standard result
+        standard_result = await reverse_meal_search(available_ingredients=ingredients)
+        
+        # LLM validate with debug output
+        validated_result = await llm_validate_response(search_query, standard_result)
+        
+        return APIResponse(
+            success=validated_result["success"],
+            data=validated_result,
+            message=validated_result.get("summary", "Iskanje jedi iz sestavin dokončano"),
+            approach="reverse_meal_search_direct_llm_validated"
+        )
+        
+    except Exception as e:
+        logger.error(f"❌ Napaka pri iskanju jedi iz sestavin: {e}")
+        return APIResponse(
+            success=False,
+            error=str(e),
+            message="Napaka pri iskanju jedi iz sestavin"
+        )
+
+
+# MEAL GROCERY ANALYSIS ENDPOINT
+@app.post("/api/meal-grocery-analysis")
+async def meal_grocery_analysis(request: dict):
+    """
+    Analiza stroškov nakupovanja za specifično jed z LLM validacijo
+    """
+    try:
+        meal_data = request.get("meal_data")
+        if not meal_data:
+            return APIResponse(
+                success=False,
+                error="Ni podatkov o jedi",
+                message="Potrebni so podatki o jedi za analizo stroškov"
+            )
+        
+        meal_title = meal_data.get('title', 'Unknown')
+        logger.info(f"🛒 Analiza stroškov za jed: {meal_title}")
+        print(f"\n🛒 MEAL GROCERY ANALYSIS REQUEST: '{meal_title}'")
+        
+        # Get grocery analysis
+        standard_result = await get_meal_with_grocery_analysis(meal_data)
+        
+        # LLM validate the result with debug output
+        validated_result = await llm_validate_response(
+            f"grocery analysis for {meal_title}", 
+            standard_result
+        )
+        
+        return APIResponse(
+            success=validated_result["success"],
+            data=validated_result,
+            message=validated_result.get("summary", "Analiza stroškov dokončana"),
+            approach="meal_grocery_analysis_llm_validated"
+        )
+        
+    except Exception as e:
+        logger.error(f"❌ Napaka pri analizi stroškov: {e}")
+        return APIResponse(
+            success=False,
+            error=str(e),
+            message="Napaka pri analizi stroškov nakupovanja"
+        )
+
 
 # HEALTH CHECK
 @app.get("/api/health")

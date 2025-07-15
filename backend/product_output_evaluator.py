@@ -32,6 +32,8 @@ class LLMOutputValidator:
         
         REZULTAT SISTEMA: {system_output}
         
+        POMEMBNO: POGLEJ ČE JE REZULTAT SISTEMA SPLOH TISTA STVAR, KI JO UPORABNIK IŠČE ALI JE TO SAMO EN DRUG PRODUKT S PODOBNIM IMENOM, KI SPLOH NE USTREZA ZAHTEVI UPORABNIKA
+
         Evalviraj:
         1. Ali rezultat odgovarja na uporabnikovo zahtevo?
         2. Ali so prikazani izdelki/jedi relevantni?
